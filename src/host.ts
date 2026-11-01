@@ -43,4 +43,10 @@ export interface SyncloHost {
   startJob(job: PendingJob): void;
   /** Writes the link into the note and says the presentation is ready. */
   onReady(job: PendingJob, gen: Generation): Promise<void>;
+  /** The deck the Synclo panel shows: the one made last in this vault. */
+  panelTarget(): PendingJob | null;
+  /** Opens the Synclo panel (or brings it forward). */
+  revealPanel(): Promise<void>;
+  /** Opens the make window for the note in front. */
+  makeFromActiveNote(): void;
 }

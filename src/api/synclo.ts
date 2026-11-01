@@ -1,3 +1,4 @@
+import { parseCardState, type CardState } from "./card";
 import { SyncloError } from "./errors";
 import { isRecord } from "./http";
 import type { McpClient } from "./mcp";
@@ -189,6 +190,14 @@ export class SyncloApi {
       }
     }
     return parseGeneration(await this.mcp.call("get_generation", { generation_id: id }, { timeoutMs: 75_000 }));
+  }
+
+  /** How a generation's deck looks so far: each slide as written, then
+   *  the finished deck's pictures. Synclo draws the finished deck inside
+   *  the ask for up to about 8 seconds. (A tool Synclo doesn't list; it is
+   *  the one its chat card uses.) */
+  async cardState(generationId: string): Promise<CardState> {
+    return parseCardState(await this.mcp.call("card_state", { generation_id: generationId }, { timeoutMs: 45_000 }));
   }
 
   /** Makes a file of a presentation (up to about 200 seconds). */

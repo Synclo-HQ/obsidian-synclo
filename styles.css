@@ -240,3 +240,254 @@
 .is-phone .synclo-buttons button {
   flex: 1 1 auto;
 }
+
+/* The Synclo panel: the deck as it arrives. Its sketches wear the deck's
+   own colors once Synclo has chosen them (--synclo-sketch-bg and
+   --synclo-sketch-ink), else the theme's. */
+.synclo-panel {
+  padding: var(--size-4-3);
+}
+
+.synclo-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-3);
+}
+
+.synclo-panel-from {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.synclo-panel-title {
+  margin-top: calc(-1 * var(--size-4-2));
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+  line-height: 1.3;
+  text-wrap: balance;
+  word-break: break-word;
+}
+
+.synclo-panel-status {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.synclo-panel-bar {
+  height: 3px;
+  margin-top: calc(-1 * var(--size-4-2));
+  overflow: hidden;
+  border-radius: 2px;
+  background-color: var(--background-modifier-border);
+}
+
+.synclo-panel-bar i {
+  display: block;
+  width: var(--synclo-progress, 0%);
+  height: 100%;
+  background-color: var(--interactive-accent);
+  transition: width 400ms ease;
+}
+
+.synclo-panel-bar.is-waiting i {
+  width: 30%;
+  animation: synclo-bar-wait 1.6s ease-in-out infinite;
+}
+
+@keyframes synclo-bar-wait {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+
+.synclo-panel-hero,
+.synclo-panel-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--background-modifier-border);
+  background-color: var(--synclo-sketch-bg, var(--background-secondary));
+}
+
+.synclo-panel-hero {
+  border-radius: var(--radius-m);
+}
+
+.synclo-panel-frame {
+  border-radius: var(--radius-s);
+}
+
+.synclo-fade {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 500ms ease;
+}
+
+.synclo-fade.is-on {
+  opacity: 1;
+}
+
+.synclo-sketch {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  padding: 10% 9%;
+  color: var(--text-faint);
+}
+
+.synclo-sketch-no {
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  font-weight: var(--font-semibold);
+}
+
+.synclo-sketch-title {
+  color: var(--synclo-sketch-ink, var(--text-normal));
+  font-size: var(--font-ui-medium);
+  line-height: 1.3;
+  opacity: 0.75;
+}
+
+.synclo-panel.has-colors .synclo-sketch-no {
+  color: var(--synclo-sketch-ink);
+  opacity: 0.6;
+}
+
+.synclo-panel-frame .synclo-sketch {
+  gap: var(--size-2-1);
+  padding: 8%;
+}
+
+.synclo-panel-frame .synclo-sketch-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--font-ui-smaller);
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.synclo-panel-msg {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--size-4-3);
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  text-align: center;
+}
+
+.synclo-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, var(--background-modifier-hover) 50%, transparent 70%);
+  background-size: 220% 100%;
+  animation: synclo-shimmer 1.8s linear infinite;
+}
+
+@keyframes synclo-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+
+.synclo-panel .synclo-panel-hero button.synclo-panel-nav {
+  position: absolute;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--background-modifier-cover);
+  box-shadow: none;
+  color: var(--text-on-accent);
+  transform: translateY(-50%);
+  cursor: var(--cursor);
+}
+
+.synclo-panel .synclo-panel-hero button.synclo-panel-nav:hover {
+  background-color: var(--background-modifier-cover);
+  color: var(--text-on-accent);
+}
+
+.synclo-panel .synclo-panel-hero button.synclo-panel-nav.is-prev {
+  left: var(--size-2-3);
+}
+
+.synclo-panel .synclo-panel-hero button.synclo-panel-nav.is-next {
+  right: var(--size-2-3);
+}
+
+.synclo-panel-cap {
+  min-height: 1.3em;
+  margin-top: calc(-1 * var(--size-4-2));
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.synclo-panel-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-3);
+}
+
+.synclo-panel-actions button {
+  width: 100%;
+}
+
+.synclo-panel-meta {
+  margin-top: calc(-1 * var(--size-2-2));
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  text-align: center;
+}
+
+.synclo-panel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--size-4-2);
+}
+
+.synclo-panel-frame.has-picture {
+  cursor: var(--cursor);
+}
+
+.synclo-panel-frame.is-selected {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.synclo-panel-frame:focus-visible {
+  outline: 2px solid var(--background-modifier-border-focus);
+  outline-offset: 1px;
+}
+
+.synclo-panel-empty {
+  display: flex;
+  justify-content: center;
+  padding: var(--size-4-8) var(--size-4-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .synclo-fade,
+  .synclo-panel-bar i {
+    transition: none;
+  }
+
+  .synclo-panel-bar.is-waiting i,
+  .synclo-shimmer {
+    animation: none;
+  }
+}

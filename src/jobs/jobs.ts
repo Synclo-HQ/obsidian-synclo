@@ -1,4 +1,4 @@
-import type { Format, Generation } from "../api/synclo";
+import type { Format, Generation, Status } from "../api/synclo";
 
 /**
  * A presentation being made: kept on this device (Obsidian's local
@@ -73,30 +73,66 @@ export interface ProgressText {
   short: string;
 }
 
+/** Where a generation stands, as both Synclo's answers can say it. */
+export interface ProgressInput {
+  status: Status;
+  /** The deck's title, when Synclo has one. */
+  title: string | null;
+  step: string | null;
+  /** Synclo has said anything about the plan yet. */
+  started: boolean;
+  /** Slides planned, and how many are written. */
+  total: number;
+  written: number;
+  /** The planned slides' titles (named in the line once planned). */
+  slideTitles: string[];
+  pictures: { made: number; total: number } | null;
+}
+
 /** What to tell the person about a generation in progress. */
 export function progressText(job: PendingJob, gen: Generation | null): ProgressText {
   const p = gen?.progress ?? null;
-  const title = p?.title || gen?.document?.title || job.title || "Untitled";
-  if (!gen || gen.status === "queued") return { title, line: "Waiting for Synclo to start…", short: "waiting to start" };
-  const total = p?.total ?? 0;
-  const written = Math.min(p?.written ?? 0, total);
-  if (!p || total === 0) {
-    return p?.step === "planning" || !p ? { title, line: `Planning the ${unit(job.format, 2)}…`, short: "planning" } : { title, line: "Starting…", short: "starting" };
+  return progressWords(
+    {
+      status: gen?.status ?? "queued",
+      title: p?.title || gen?.document?.title || null,
+      step: p?.step ?? null,
+      started: !!p,
+      total: p?.total ?? 0,
+      written: p?.written ?? 0,
+      slideTitles: p?.slides.map((s) => s.title) ?? [],
+      pictures: p?.pictures ?? null,
+    },
+    job.format,
+    job.title,
+  );
+}
+
+/** The words for where a generation stands. `named` lists the first
+ *  planned titles after the count. */
+export function progressWords(input: ProgressInput, format: Format, fallbackTitle: string, named = true): ProgressText {
+  const title = input.title || fallbackTitle || "Untitled";
+  if (input.status === "queued") return { title, line: "Waiting for Synclo to start…", short: "waiting to start" };
+  const total = input.total;
+  const written = Math.min(input.written, total);
+  if (!input.started || total === 0) {
+    return input.step === "planning" || !input.started ? { title, line: `Planning the ${unit(format, 2)}…`, short: "planning" } : { title, line: "Starting…", short: "starting" };
   }
   if (written === 0) {
-    const names = p.slides.map((s) => s.title).filter(Boolean);
+    const names = named ? input.slideTitles.filter(Boolean) : [];
     const shown = names.slice(0, 3).join(", ");
     const more = names.length > 3 ? "…" : "";
     return {
       title,
-      line: shown ? `Planned ${total} ${unit(job.format, total)}: ${shown}${more}` : `Planned ${total} ${unit(job.format, total)}`,
-      short: `planned ${total} ${unit(job.format, total)}`,
+      line: shown ? `Planned ${total} ${unit(format, total)}: ${shown}${more}` : `Planned ${total} ${unit(format, total)}`,
+      short: `planned ${total} ${unit(format, total)}`,
     };
   }
-  if (written < total) return { title, line: `${written} of ${total} ${unit(job.format, total)} written`, short: `${written} of ${total} ${unit(job.format, total)}` };
-  if (p.pictures && p.pictures.total > 0 && p.pictures.made < p.pictures.total) {
-    return { title, line: `Adding images: ${p.pictures.made} of ${p.pictures.total}`, short: `images ${p.pictures.made} of ${p.pictures.total}` };
+  if (written < total) return { title, line: `${written} of ${total} ${unit(format, total)} written`, short: `${written} of ${total} ${unit(format, total)}` };
+  const pics = input.pictures;
+  if (pics && pics.total > 0 && pics.made < pics.total) {
+    return { title, line: `Adding images: ${pics.made} of ${pics.total}`, short: `images ${pics.made} of ${pics.total}` };
   }
-  if (p.step === "checking") return { title, line: `Checking every ${unit(job.format, 1)}…`, short: "checking" };
+  if (input.step === "checking") return { title, line: `Checking every ${unit(format, 1)}…`, short: "checking" };
   return { title, line: "Finishing…", short: "finishing" };
 }

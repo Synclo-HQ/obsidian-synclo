@@ -14,6 +14,7 @@ import { DEFAULT_SETTINGS, parseSettings, type SyncloSettings } from "./settings
 import { FindModal } from "./ui/find-modal";
 import { MakeModal, makeWindowOpen } from "./ui/make-modal";
 import { richContent, richNotice, type NoticeAction } from "./ui/notices";
+import { PANEL_VIEW, SyncloPanelView } from "./ui/panel-view";
 import { ProgressView } from "./ui/progress";
 import { SyncloSettingTab } from "./ui/settings-tab";
 
@@ -29,6 +30,8 @@ const LINK_KEY = "synclo";
 const FILES_KEY = "synclo files";
 /** Presentations being made on this device (this vault's local storage). */
 const JOBS_KEY = "synclo-pending-jobs";
+/** The deck the Synclo panel shows (this vault's local storage). */
+const PANEL_KEY = "synclo-panel-deck";
 const ACCOUNT_FRESH_MS = 60_000;
 
 export default class SyncloPlugin extends Plugin implements SyncloHost {
@@ -78,6 +81,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
 
     this.settingsTab = new SyncloSettingTab(this, this);
     this.addSettingTab(this.settingsTab);
+    this.registerView(PANEL_VIEW, (leaf) => new SyncloPanelView(leaf, this));
     this.registerObsidianProtocolHandler("synclo-auth", (params) => void this.onSignInReturn(params));
     this.register(
       this.session.onChange((signedIn, reason) => {
@@ -90,6 +94,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
         this.runner.setWorkspace(null);
         if (signedIn) {
           this.progress.signedIn();
+          this.eachPanel((view) => view.wake());
           this.runner.resumeAll();
         } else if (reason === "expired" && !this.runner.list().some((j) => j.base === this.base())) {
           // With presentations waiting, their notice says it instead.
@@ -103,7 +108,13 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     this.addRibbonIcon("presentation", "Make a presentation from this note", () => this.makeFromActive());
     this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => this.fileMenu(menu, file)));
     this.registerEvent(this.app.workspace.on("editor-menu", (menu, editor, info) => this.editorMenu(menu, editor, info)));
-    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => this.runner.renamed(oldPath, file.path)));
+    this.registerEvent(
+      this.app.vault.on("rename", (file, oldPath) => {
+        this.runner.renamed(oldPath, file.path);
+        const deck = this.panelTarget();
+        if (deck?.notePath === oldPath) this.setPanelTarget({ ...deck, notePath: file.path });
+      }),
+    );
     // Back to the front, or back online: check on presentations at once.
     this.registerDomEvent(document, "visibilitychange", () => {
       if (document.visibilityState === "visible") this.backToWork();
@@ -212,9 +223,50 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     return url;
   }
 
+  panelTarget(): PendingJob | null {
+    return parseJobs([this.app.loadLocalStorage(PANEL_KEY)])[0] ?? null;
+  }
+
+  private setPanelTarget(job: PendingJob): void {
+    this.app.saveLocalStorage(PANEL_KEY, job);
+    this.eachPanel((view) => view.show(job));
+  }
+
+  /** Every open Synclo panel that is loaded (a panel not loaded yet reads
+   *  its deck when it is). */
+  private eachPanel(run: (view: SyncloPanelView) => void): void {
+    for (const leaf of this.app.workspace.getLeavesOfType(PANEL_VIEW)) if (leaf.view instanceof SyncloPanelView) run(leaf.view);
+  }
+
+  async revealPanel(): Promise<void> {
+    const { workspace } = this.app;
+    let leaf = workspace.getLeavesOfType(PANEL_VIEW)[0] ?? null;
+    if (!leaf) {
+      leaf = workspace.getRightLeaf(false);
+      if (!leaf) return;
+      // Opened beside the note, which keeps the focus.
+      await leaf.setViewState({ type: PANEL_VIEW, active: false });
+    }
+    await workspace.revealLeaf(leaf);
+  }
+
+  /** A Synclo panel is on screen now (not closed, not behind another tab,
+   *  not in a collapsed sidebar). */
+  private panelVisible(): boolean {
+    if (activeDocument.visibilityState !== "visible") return false;
+    return this.app.workspace.getLeavesOfType(PANEL_VIEW).some((leaf) => leaf.view instanceof SyncloPanelView && leaf.view.containerEl.isShown());
+  }
+
+  makeFromActiveNote(): void {
+    this.makeFromActive();
+  }
+
   startJob(job: PendingJob): void {
     const account = this.cachedAccount();
     if (account && !job.workspace) job.workspace = workspaceOf(account);
+    // The panel follows the deck made last; on a computer Make opens it.
+    this.setPanelTarget(job);
+    if (!Platform.isMobile) void this.revealPanel();
     this.progress.started(job);
     this.runner.add(job);
   }
@@ -250,12 +302,18 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
       : file
         ? " The link couldn't be written into the note's properties; check that they are valid."
         : " The note was moved out of the vault or deleted, so the link wasn't written.";
+    this.eachPanel((view) => view.wake());
+    // The panel shows a ready deck itself; the notice is for when it can't
+    // be seen (closed, behind another tab, a collapsed sidebar, a phone),
+    // and for a link that couldn't be written.
+    if (!Platform.isMobile && linkWritten && this.panelVisible()) return;
     richNotice({
       title: `“${doc.title}” is ready`,
       line: `${count}.${where}${credits}`,
       detail: gen.warnings[0],
       actions: [
         { label: "Open in Synclo", primary: true, run: () => this.openExternal(doc.editUrl) },
+        ...(Platform.isMobile ? [{ label: "Watch", run: () => void this.revealPanel() }] : []),
         { label: "Download PowerPoint", run: () => void this.download(doc.id, "pptx", file, doc.title) },
         { label: "Download PDF", run: () => void this.download(doc.id, "pdf", file, doc.title) },
       ],

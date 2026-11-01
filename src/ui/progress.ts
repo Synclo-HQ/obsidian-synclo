@@ -1,25 +1,25 @@
-import { Notice, Platform } from "obsidian";
+import { Platform } from "obsidian";
 import { MESSAGES, SyncloError } from "../api/errors";
 import type { Generation } from "../api/synclo";
 import type { SyncloHost } from "../host";
 import { progressText, type PendingJob } from "../jobs/jobs";
 import type { RunnerEvents } from "../jobs/runner";
-import { noticeContent, richNotice } from "./notices";
+import { richNotice } from "./notices";
+import { noteNameOf } from "./panel-view";
 
 interface Shown {
-  notice: Notice | null;
-  /** The person closed it: progress stays in the status bar only. */
-  dismissed: boolean;
   title: string;
-  line: string;
   short: string;
 }
 
+/** About how long the start notice stays. */
+const START_NOTICE_MS = 8_000;
+
 /**
- * What the person sees while a presentation is made: a notice that
- * updates as Synclo plans and writes the slides (they can close it and
- * keep working), and on desktop a line in the status bar. A click on the
- * status bar shows the notices again.
+ * What the person sees while a presentation is made. The Synclo panel shows
+ * the deck as it arrives; here, a short notice at the start (on a phone it
+ * offers Watch, which opens the panel) and, on desktop, one line in the
+ * status bar that opens the panel when clicked.
  */
 export class ProgressView implements RunnerEvents {
   private shown = new Map<string, Shown>();
@@ -33,7 +33,7 @@ export class ProgressView implements RunnerEvents {
     this.status = Platform.isDesktopApp ? statusBar : null;
     if (this.status) {
       this.status.addClass("synclo-status", "mod-clickable");
-      this.status.addEventListener("click", () => this.showAgain());
+      this.status.addEventListener("click", () => void this.host.revealPanel());
       this.status.hide();
     }
   }
@@ -41,24 +41,28 @@ export class ProgressView implements RunnerEvents {
   /** A presentation has just been started. */
   started(job: PendingJob): void {
     this.signedOutTold = false;
-    this.update(job, job.title || "Untitled", "Waiting for Synclo to start… This takes three to five minutes; you can keep working.", "waiting to start");
+    const name = noteNameOf(job.notePath);
+    if (Platform.isMobile) {
+      richNotice({
+        title: `Making “${name}”`,
+        line: "It takes about three minutes.",
+        duration: START_NOTICE_MS,
+        actions: [{ label: "Watch", primary: true, run: () => void this.host.revealPanel() }],
+      });
+    } else {
+      richNotice({ title: `Making “${name}”`, line: "Follow it in the Synclo panel.", duration: START_NOTICE_MS });
+    }
+    this.update(job, job.title || name, "waiting to start");
   }
 
   progress(job: PendingJob, gen: Generation): void {
     const t = progressText(job, gen);
-    this.update(job, t.title, t.line, t.short);
+    this.update(job, t.title, t.short);
   }
 
   trouble(job: PendingJob, error: unknown): void {
-    const s = this.shown.get(job.generationId);
     const kind = error instanceof SyncloError ? error.kind : "network";
-    const [line, short] =
-      kind === "network"
-        ? ["Can't reach Synclo right now. It's still being made, and this updates when you're back online.", "waiting for a connection"]
-        : kind === "rate-limited"
-          ? ["Checking again in a minute. It's still being made.", "checking again soon"]
-          : ["Synclo is briefly busy. It's still being made, and this updates in a moment.", "checking again soon"];
-    this.update(job, s?.title ?? job.title, line, short);
+    this.update(job, this.shown.get(job.generationId)?.title ?? job.title, kind === "network" ? "waiting for a connection" : "checking again soon");
   }
 
   async ready(job: PendingJob, gen: Generation): Promise<void> {
@@ -93,49 +97,20 @@ export class ProgressView implements RunnerEvents {
     this.signedOutTold = false;
   }
 
-  /** Every notice closed and the status bar cleared (the plugin unloads). */
+  /** The status bar cleared (the plugin unloads). */
   clear(): void {
-    for (const s of this.shown.values()) s.notice?.hide();
     this.shown.clear();
     this.renderStatus();
   }
 
-  private update(job: PendingJob, title: string, line: string, short: string): void {
-    let s = this.shown.get(job.generationId);
-    if (!s) {
-      s = { notice: null, dismissed: false, title, line, short };
-      this.shown.set(job.generationId, s);
-    }
-    const changed = s.title !== title || s.line !== line || !s.notice;
-    s.title = title;
-    s.line = line;
-    s.short = short;
-    if (!s.dismissed && changed) {
-      const heading = `Making “${title}”`;
-      if (s.notice && s.notice.containerEl.isConnected) s.notice.setMessage(noticeContent(heading, line));
-      else if (!s.notice) {
-        const entry = s;
-        entry.notice = new Notice(noticeContent(heading, line), 0);
-        entry.notice.containerEl.addEventListener("click", () => (entry.dismissed = true));
-      } else s.dismissed = true;
-    }
+  private update(job: PendingJob, title: string, short: string): void {
+    this.shown.set(job.generationId, { title, short });
     this.renderStatus();
   }
 
   private close(id: string): void {
-    this.shown.get(id)?.notice?.hide();
     this.shown.delete(id);
     this.renderStatus();
-  }
-
-  private showAgain(): void {
-    for (const s of this.shown.values()) {
-      s.notice?.hide();
-      const entry = s;
-      entry.dismissed = false;
-      entry.notice = new Notice(noticeContent(`Making “${s.title}”`, s.line), 0);
-      entry.notice.containerEl.addEventListener("click", () => (entry.dismissed = true));
-    }
   }
 
   private renderStatus(): void {
@@ -147,7 +122,7 @@ export class ProgressView implements RunnerEvents {
       return;
     }
     this.status.show();
-    this.status.setText(all.length === 1 ? `Synclo: ${all[0]?.short ?? ""}` : `Synclo: making ${all.length} presentations`);
+    this.status.setText(all.length === 1 ? `Synclo · ${all[0]?.short ?? ""}` : `Synclo · making ${all.length} presentations`);
     this.status.setAttribute("aria-label", "Show progress");
   }
 }
