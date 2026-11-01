@@ -231,7 +231,9 @@ export class MakeModal extends Modal {
     const el = this.summaryEl;
     el.empty();
     const m = this.material;
-    el.createDiv({ cls: "synclo-summary-from", text: this.source.selection !== undefined ? "From the selection in" : "From the note" });
+    // The note by its file name, as the Synclo panel names it.
+    const fileName = this.source.file.basename;
+    el.createDiv({ cls: "synclo-summary-from", text: this.source.selection !== undefined ? `From the selection in “${fileName}”` : `From “${fileName}”` });
     if (!m) {
       el.createDiv({ cls: "synclo-summary-title", text: this.source.file.basename });
       el.createDiv({ cls: "synclo-summary-line", text: "Reading the note…" });
@@ -250,12 +252,14 @@ export class MakeModal extends Modal {
     const existing: unknown = this.host.app.metadataCache.getFileCache(this.source.file)?.frontmatter?.synclo;
     if (typeof existing === "string" && /^https?:\/\//.test(existing)) {
       const hint = el.createDiv({ cls: "synclo-hint" });
-      hint.appendText("This note already has a presentation. Making another replaces its link. ");
+      hint.createEl("strong", { text: "This note already has a presentation." });
+      hint.appendText(" ");
       const open = hint.createEl("a", { text: "Open it", href: existing });
       open.addEventListener("click", (e) => {
         e.preventDefault();
         this.host.openExternal(existing);
       });
+      hint.appendText(" · Making a new one links the note to the new one; the first stays in your Synclo library.");
     }
     if (this.mode() === "generate") {
       const pics = m.pictures.length ? " Images in it aren't used." : "";
