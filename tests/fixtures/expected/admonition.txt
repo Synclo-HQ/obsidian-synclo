@@ -1,0 +1,10 @@
+# Admonition
+
+> **Check before sending**
+> Make sure the numbers match the report.
+>
+> ```python
+> print("kept")
+> ```
+
+After the admonition.

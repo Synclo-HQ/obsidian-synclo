@@ -1,0 +1,20 @@
+# Pictures
+
+![team](https://img.synclo.test/p1.png)
+![Architecture diagram](https://img.synclo.test/p2.png)
+![team photo 2026](https://img.synclo.test/p3.png)
+![Sales chart](https://img.synclo.test/p4.png)
+![The office](https://img.synclo.test/p5.png)
+![From the web](https://example.com/images/skyline.png)
+
+![The team, again](https://img.synclo.test/p1.png)
+- ![](https://img.synclo.test/p6.png)
+- A picture that is missing:
+
+The whiteboard from Tuesday:
+
+Customer
+Checkout flow
+Pay later?
+
+An empty sketch:

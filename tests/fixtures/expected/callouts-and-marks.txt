@@ -1,0 +1,41 @@
+# Weekly review
+
+> **Keep it short**
+> One slide per project.
+
+> **Warning**
+> Folded callout with no title.
+
+> **Info**
+> > **Nested**
+> > A quote inside.
+
+Things to **remember** this week.
+
+- [ ] Send the deck
+- [x] Book the room
+
+Revenue grew in every region.[^1]
+
+[^1]: Finance report, October.
+
+$$
+\text{growth} = 15\% \quad % a LaTeX comment, kept
+$$
+
+| Project | Lead |
+| --- | --- |
+| Apollo | Ana |
+
+```mermaid
+graph LR
+  A --> B
+```
+
+## Results
+
+Text under the results heading.
+
+---
+
+After the rule. See #42 for details and C# for the code.

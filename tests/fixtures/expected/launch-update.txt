@@ -1,0 +1,37 @@
+# Launch update
+
+This week we moved the launch forward. Here is where things stand, in the plan's own words.
+
+## Timeline
+
+1. Private beta on November 3.
+2. Public launch on November 24.
+
+The one risk that matters most:
+
+- The payment provider review may take two weeks.
+  - Backup: invoice by hand for the first month.
+
+And the summary from the garden project, because it shares a budget:
+
+> We want a garden that needs less water and gives more shade.
+
+Everything about the garden:
+
+## Garden redesign
+
+We want a garden that needs less water and gives more shade.
+
+### Plants
+
+Lavender, rosemary and two olive trees along the south wall.
+
+A section that is gone:
+
+The reading list, which embeds the plan again:
+
+## Reading list
+
+- Thinking in Systems
+- The Design of Everyday Things
+- Apollo launch

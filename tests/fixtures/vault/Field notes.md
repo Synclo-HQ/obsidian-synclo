@@ -1,0 +1,15 @@
+---
+title: "Q3 field notes"
+author: Ana
+rating: 4
+tags:
+  - research
+  - interviews
+aliases: [Field notes Q3]
+---
+Status:: Draft
+Reviewed by:: [[Ana]]
+- Owner:: Marco
+
+We spoke to twelve farmers [region:: north] about water use (rating:: 5) this quarter.
+Most of them want sensors that work offline, and almost none trust the current app.

@@ -1,0 +1,29 @@
+# Comments and code
+
+Visible text stays.
+The quarter went well.
+
+Text before text after.
+
+Start of line
+and the rest of the line stays.
+
+```js
+// %% this is code, not a comment %%
+const tag = "#not-a-tag";
+```
+
+Inline code `%%kept%%` and `#kept` stays as written.
+
+This note is called and has pages.
+
+> **Inside a callout**
+> A line in the callout.
+>
+> The callout goes on.
+
+~~~
+A tilde fence with ``` inside
+~~~
+
+The end.
