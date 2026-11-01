@@ -71,7 +71,8 @@ When it's ready, its link is written into the note's properties as `synclo`,
 and a notice offers **Open in Synclo**, **Download PowerPoint** and **Download
 PDF**. Downloads go in the note's folder, or in Obsidian's attachment folder
 (a setting), and are linked in the note's properties under `synclo files`.
-Existing files are never overwritten.
+Existing files are never overwritten. Files made on Synclo's Free plan carry a
+small "Made with Synclo" mark.
 
 ## What is sent, and when
 
