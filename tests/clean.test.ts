@@ -90,8 +90,18 @@ describe("marks and blocks", () => {
     expect(clean("- item\n---\nafter").text).toBe("- item\n\n---\n\nafter");
   });
 
-  it("reads Dataview fields as words", () => {
-    expect(clean("Due:: Friday\n- [ ] Owner:: Ana\nSee [kind:: memo] (score:: 9) std::vector").text).toBe("Due: Friday\n- [ ] Owner: Ana\nSee kind: memo 9 std::vector");
+  it("reads a Dataview field that is a whole line as words", () => {
+    expect(clean("Due:: Friday\n- [ ] Owner:: Ana\n[Status:: Draft]\n- (priority:: high)\n> [Owner:: Marco]").text).toBe("Due: Friday\n- [ ] Owner: Ana\nStatus: Draft\n- priority: high\n> Owner: Marco");
+  });
+
+  it("takes a Dataview field inside a sentence out, and closes the gap", () => {
+    expect(clean("We spoke to twelve farmers [region:: north] about water use (rating:: 5) this quarter.").text).toBe("We spoke to twelve farmers about water use this quarter.");
+    expect(clean("Sales grew [source:: Q3 report].").text).toBe("Sales grew.");
+    expect(clean("Sales grew (source:: Q3), then fell.").text).toBe("Sales grew, then fell.");
+    expect(clean("Two [a:: 1] [b:: 2] fields and std::vector stay apart").text).toBe("Two fields and std::vector stay apart");
+    expect(clean("[a:: 1] Starts the line").text).toBe("Starts the line");
+    expect(clean("`code` [a:: 1] after").text).toBe("`code` after");
+    expect(clean("Ends with a field [a:: 1]").text).toBe("Ends with a field");
   });
 
   it("leaves Dataview's inline queries out", () => {

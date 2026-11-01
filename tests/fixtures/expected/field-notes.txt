@@ -4,5 +4,5 @@ Status: Draft
 Reviewed by: Ana
 - Owner: Marco
 
-We spoke to twelve farmers region: north about water use 5 this quarter.
+We spoke to twelve farmers about water use this quarter.
 Most of them want sensors that work offline, and almost none trust the current app.

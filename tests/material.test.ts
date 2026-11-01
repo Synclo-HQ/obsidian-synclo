@@ -77,6 +77,9 @@ describe("frontmatter with Dataview fields", () => {
     check("field-notes.txt", sent(m));
     expect(m.title).toBe("Q3 field notes");
     expect(sent(m)).not.toContain("author: Ana");
+    expect(sent(m)).toContain("Status: Draft");
+    expect(sent(m)).toContain("We spoke to twelve farmers about water use this quarter.");
+    expect(sent(m)).not.toMatch(/region|rating/);
   });
 });
 

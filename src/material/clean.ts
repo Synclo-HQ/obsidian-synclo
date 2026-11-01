@@ -138,6 +138,10 @@ const WIKI = /(!?)\[\[([^[\]\n]+?)\]\]/g;
 const MD_LINK = /(!?)\[((?:[^[\]\n]|\[[^[\]\n]*\])*)\]\(\s*(<[^>\n]*>|(?:[^\s()]|\([^\s()]*\))+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?\s*\)/g;
 const FIELD_BRACKET = /\[([\p{L}\p{N}][\p{L}\p{N} _/-]{0,60}?)::[ \t]*([^\]\n]*)\]/gu;
 const FIELD_PAREN = /\(([\p{L}\p{N}][\p{L}\p{N} _/-]{0,60}?)::[ \t]*([^)\n]*)\)/gu;
+/** A line that is one bracketed field, after any list marker or task box. */
+const FIELD_WHOLE = /^([ \t]*(?:[-*+][ \t]+(?:\[.\][ \t]+)?|\d+[.)][ \t]+)?)(?:\[([\p{L}\p{N}][\p{L}\p{N} _/-]{0,60}?)::[ \t]*([^\]\n]*)\]|\(([\p{L}\p{N}][\p{L}\p{N} _/-]{0,60}?)::[ \t]*([^)\n]*)\))[ \t]*$/u;
+/** Where a field inside a sentence was taken out (tidied before sending). */
+const FIELD_GONE = "\uE003";
 const FIELD_LINE = /^([ \t]*(?:>[ \t]?)*[ \t]*(?:[-*+][ \t]+(?:\[.\][ \t]+)?|\d+[.)][ \t]+)?)([\p{L}\p{N}][\p{L}\p{N} _/-]{0,60}?)::(?=[ \t]|$)/u;
 const HIGHLIGHT = /==(\S(?:[^\n]*?\S)?)==/g;
 const BLOCK_ID_TAIL = /[ \t]+\^[A-Za-z0-9-]+[ \t]*$/;
@@ -165,9 +169,12 @@ export function cleanMarkdown(markdown: string, options: CleanOptions): CleanRes
 
   const prose = (text: string): string => {
     let t = text;
-    // Dataview fields written inline, before the link pass reads brackets.
-    t = t.replace(FIELD_BRACKET, (_m, key: string, value: string) => `${key.trim()}: ${value.trim()}`);
-    t = t.replace(FIELD_PAREN, (_m, _key: string, value: string) => value.trim());
+    // A Dataview field inside a sentence is the vault's bookkeeping, not
+    // the sentence's words: it goes, before the link pass reads brackets.
+    // (A field that is a whole line was written out as words already.)
+    const fields = t.replace(FIELD_BRACKET, FIELD_GONE).replace(FIELD_PAREN, FIELD_GONE);
+    if (fields !== t) removedInLine = true;
+    t = fields;
     t = t.replace(WIKI, (_m, bang: string, inner: string) => {
       const parts = parseWikiInner(inner);
       if (bang) {
@@ -215,7 +222,7 @@ export function cleanMarkdown(markdown: string, options: CleanOptions): CleanRes
       t = t.replace(/(\S)[ \t]{2,}(?=\S)/g, "$1 ");
       removedInLine = true;
     }
-    return t;
+    return closeGaps(t);
   };
   /** Something was taken out of the current line (a comment, a tag). */
   let removedInLine = false;
@@ -385,6 +392,9 @@ export function cleanMarkdown(markdown: string, options: CleanOptions): CleanRes
         }
         continue;
       }
+      // A line that is one Dataview field reads as "key: value".
+      const field = FIELD_WHOLE.exec(rest);
+      if (field) line = `${prefix}${field[1] ?? ""}${(field[2] ?? field[4] ?? "").trim()}: ${(field[3] ?? field[5] ?? "").trim()}`;
       // A callout's first line: its title, in bold.
       const callout = /^\[!([^\]\s]+)\]([+-]?)[ \t]*(.*)$/.exec(rest);
       if (prefix && callout) line = `${prefix}**${(callout[3] ?? "").trim() || calloutLabel(callout[1] ?? "")}**`;
@@ -417,6 +427,20 @@ export function cleanMarkdown(markdown: string, options: CleanOptions): CleanRes
 
 function admonitionTitle(type: string): string {
   return calloutLabel(type);
+}
+
+/** Closes the gap a field left inside a sentence: one space between
+ *  words, none before punctuation or a closing bracket, none at the start. */
+function closeGaps(text: string): string {
+  if (!text.includes(FIELD_GONE)) return text;
+  return text.replace(/[ \t]*(?:\uE003[ \t]*)+/g, (gap: string, at: number, whole: string) => {
+    const before = whole.slice(0, at);
+    const next = whole[at + gap.length];
+    if (next === undefined || /[.,;:!?)\]}…]/.test(next)) return "";
+    if (/[([{]$/.test(before)) return "";
+    if (before === "") return /^[ \t]/.test(gap) ? " " : "";
+    return /[ \t]/.test(gap) ? " " : "";
+  });
 }
 
 /** A line with nothing left but quote markers, a list marker or a task box. */
