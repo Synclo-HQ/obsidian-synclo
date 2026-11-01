@@ -6,13 +6,23 @@ import { askMore, changedSlide, imageKey, panelSlides, type PanelSlide } from ".
 import { CardPoller, type StopReason } from "./poller";
 
 /**
- * One deck as the Synclo panels see it, shared by every panel showing it:
- * one poller per generation (two panels never double the asks), the latest
- * answer, the slides, the slide that changed last, each picture's address,
- * the presentation as the job runner learned it, and why asking stopped
- * when it stopped on a refusal. It asks only while a panel showing it can
- * be seen; with no panel left, it stops asking.
+ * One deck as the Synclo panels and deck viewers see it, shared by every
+ * view showing it: one poller per generation (two views never double the
+ * asks), the latest answer, the slides, the slide that changed last, each
+ * picture's address, the presentation as the job runner learned it, and
+ * why asking stopped when it stopped on a refusal. It asks only while a
+ * view showing it can be seen; with none left, it stops asking. Picture
+ * addresses last an hour: a view seen again after 45 minutes asks again.
  */
+
+/** How long a picture's address is used before a newer one is. */
+export const ADDRESS_FRESH_MS = 45 * 60 * 1000;
+
+interface Address {
+  address: string;
+  /** When Synclo gave it. */
+  at: number;
+}
 
 export interface WatchSubscriber {
   /** The deck changed: draw it again. */
@@ -54,10 +64,12 @@ export class DeckWatch {
   /** The presentation as the job runner learned it, for when the panel's
    *  own answer doesn't say so yet. */
   runnerDocument: RunnerDocument | null = null;
-  /** Each picture's first address (kept, so a fresh signature never
-   *  reloads it) and its latest (used if the first one expires). */
-  private firstAddress = new Map<string, string>();
-  private latestAddress = new Map<string, string>();
+  /** When Synclo last answered. */
+  answeredAt: number | null = null;
+  /** Each picture's address in use (kept, so a fresh signature never
+   *  reloads it, until it nears its end) and its latest. */
+  private firstAddress = new Map<string, Address>();
+  private latestAddress = new Map<string, Address>();
   private subscribers = new Set<WatchSubscriber>();
   private poller: CardPoller | null = null;
 
@@ -70,7 +82,8 @@ export class DeckWatch {
    *  longer does. */
   subscribe(subscriber: WatchSubscriber): () => void {
     this.subscribers.add(subscriber);
-    this.ensurePoller()?.wake();
+    this.ensurePoller();
+    this.wake();
     return () => {
       this.subscribers.delete(subscriber);
       // No panel shows it any more: no more asks.
@@ -81,9 +94,23 @@ export class DeckWatch {
     };
   }
 
-  /** A panel came into view, or Obsidian came back. */
+  /** A view showing it opened, came into view, or Obsidian came back:
+   *  asks now if asking had paused, and asks afresh when the last answer's
+   *  picture addresses are nearing their end. */
   wake(): void {
+    const answeredAt = this.answeredAt;
+    if (answeredAt !== null && this.deps.now() - answeredAt > ADDRESS_FRESH_MS && this.seen()) {
+      // Once: the next answer says when again.
+      this.answeredAt = null;
+      this.restart();
+      return;
+    }
     this.poller?.wake();
+  }
+
+  /** A view shows this deck (it is worth keeping). */
+  get inUse(): boolean {
+    return this.subscribers.size > 0;
   }
 
   /** Starts asking afresh (after a sign-in or a sign-out, or when the job
@@ -110,9 +137,20 @@ export class DeckWatch {
     this.notify();
   }
 
-  /** The address to show for a picture: the first one seen for it. */
+  /** The address to show for a picture: the first one seen for it, until
+   *  it nears the end of its hour; then the newest, kept from then on. */
   address(image: string | null): string | null {
-    return image ? (this.firstAddress.get(imageKey(image)) ?? image) : null;
+    if (!image) return null;
+    const key = imageKey(image);
+    const first = this.firstAddress.get(key);
+    if (!first) return image;
+    if (this.deps.now() - first.at <= ADDRESS_FRESH_MS) return first.address;
+    const latest = this.latestAddress.get(key);
+    if (latest && latest.at > first.at) {
+      this.firstAddress.set(key, latest);
+      return latest.address;
+    }
+    return first.address;
   }
 
   /** The newest address for a picture whose address failed to load (its
@@ -120,9 +158,14 @@ export class DeckWatch {
   fresher(failed: string): string | null {
     const key = imageKey(failed);
     const latest = this.latestAddress.get(key);
-    if (!latest || latest === failed) return null;
+    if (!latest || latest.address === failed) return null;
     this.firstAddress.set(key, latest);
-    return latest;
+    return latest.address;
+  }
+
+  /** A view showing it is on screen. */
+  private seen(): boolean {
+    return [...this.subscribers].some((s) => s.visible());
   }
 
   /** The poller, made if a panel shows the deck and none is running; null
@@ -142,7 +185,7 @@ export class DeckWatch {
         this.stopped = { reason, error };
         this.notify();
       },
-      visible: () => [...this.subscribers].some((s) => s.visible()),
+      visible: () => this.seen(),
       expired: () => this.deps.expired(this.target),
       timers: this.deps.timers,
       now: this.deps.now,
@@ -152,11 +195,13 @@ export class DeckWatch {
 
   private answer(card: CardState): void {
     const slides = panelSlides(card);
+    const at = this.deps.now();
+    this.answeredAt = at;
     for (const s of slides) {
       if (!s.image) continue;
       const key = imageKey(s.image);
-      this.latestAddress.set(key, s.image);
-      if (!this.firstAddress.has(key)) this.firstAddress.set(key, s.image);
+      this.latestAddress.set(key, { address: s.image, at });
+      if (!this.firstAddress.has(key)) this.firstAddress.set(key, { address: s.image, at });
     }
     const changed = changedSlide(this.slides, slides);
     if (changed !== null) this.lastChanged = changed;

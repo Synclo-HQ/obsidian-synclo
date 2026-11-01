@@ -1,10 +1,9 @@
 import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
-import { MESSAGES } from "../api/errors";
 import type { SyncloHost } from "../host";
 import { progressInputOf, progressWords, unit, type PendingJob } from "../jobs/jobs";
-import { NOT_FOUND_MESSAGE } from "../jobs/runner";
-import { cardProgressInput, heroSlide, shareOf } from "../panel/model";
+import { cardProgressInput, heroSlide, imageKey, shareOf } from "../panel/model";
 import type { DeckWatch, RunnerDocument } from "../panel/watch";
+import { capital, finalOf, onScreen, presentationOf } from "./views";
 
 export const PANEL_VIEW = "synclo-panel";
 
@@ -40,6 +39,9 @@ interface Parts {
   status: HTMLElement;
   bar: HTMLElement;
   hero: HTMLElement;
+  /** The large slide as the way into the deck viewer (over the picture,
+   *  under the arrows). */
+  opener: HTMLElement;
   heroFader: Fader;
   heroNo: HTMLElement;
   heroTitle: HTMLElement;
@@ -53,17 +55,6 @@ interface Parts {
   grid: HTMLElement;
   frames: Frame[];
 }
-
-/** Said in place of where it stands when there is no more to follow, with
- *  what the person can do about it. */
-interface Final {
-  message: string;
-  action: { label: string; run: () => void } | null;
-  /** The action is to connect again (a sign-in is got ready for it). */
-  connect?: boolean;
-}
-
-const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /**
  * The Synclo panel: the deck being made, as it arrives. The plan, then
@@ -83,6 +74,8 @@ export class SyncloPanelView extends ItemView {
   private drawnReady: string | null = null;
   /** The deck is finished (as last drawn). */
   private finished = false;
+  /** The slide the large frame shows (as last drawn). */
+  private heroAt: number | null = null;
   private fixRun: (() => void) | null = null;
   /** A sign-in was got ready for the Connect shown. */
   private connectReady = false;
@@ -147,11 +140,7 @@ export class SyncloPanelView extends ItemView {
   /** On screen: its window in front, the panel not behind another tab, its
    *  sidebar not collapsed, its drawer not closed. */
   visible(): boolean {
-    if (this.containerEl.doc.visibilityState !== "visible" || !this.containerEl.isShown()) return false;
-    const root = this.leaf.getRoot();
-    const { leftSplit, rightSplit } = this.app.workspace;
-    for (const side of [leftSplit, rightSplit]) if (root === side && side.collapsed) return false;
-    return true;
+    return onScreen(this.app, this);
   }
 
   /** On screen, showing this deck as ready with its actions. */
@@ -208,6 +197,7 @@ export class SyncloPanelView extends ItemView {
     const heroTitle = heroSketch.createDiv({ cls: "synclo-sketch-title" });
     const heroFader = this.fader(hero, heroSketch);
     const heroMsg = hero.createDiv({ cls: "synclo-panel-msg" });
+    const opener = hero.createDiv({ cls: "synclo-panel-open" });
     const prev = hero.createEl("button", { cls: "synclo-panel-nav is-prev", attr: { type: "button" } });
     setIcon(prev, "chevron-left");
     const next = hero.createEl("button", { cls: "synclo-panel-nav is-next", attr: { type: "button" } });
@@ -220,12 +210,12 @@ export class SyncloPanelView extends ItemView {
       evt.stopPropagation();
       this.step(1);
     });
-    // While it is made, the large frame (like the latest slide) goes back
-    // to following the slide that changed last.
-    hero.addEventListener("click", () => {
-      if (this.finished || this.picked === null) return;
-      this.picked = null;
-      this.render();
+    // The large slide opens the deck viewer at that slide.
+    opener.addEventListener("click", () => this.openViewer());
+    opener.addEventListener("keydown", (evt) => {
+      if (evt.key !== "Enter" && evt.key !== " ") return;
+      evt.preventDefault();
+      this.openViewer();
     });
 
     const cap = body.createDiv({ cls: "synclo-panel-cap" });
@@ -244,7 +234,7 @@ export class SyncloPanelView extends ItemView {
     const meta = body.createDiv({ cls: "synclo-panel-meta" });
     const grid = body.createDiv({ cls: "synclo-panel-grid" });
 
-    this.parts = { from, title, status, bar, hero, heroFader, heroNo, heroTitle, heroMsg, prev, next, cap, fix, actions, meta, grid, frames: [] };
+    this.parts = { from, title, status, bar, hero, opener, heroFader, heroNo, heroTitle, heroMsg, prev, next, cap, fix, actions, meta, grid, frames: [] };
     this.render();
   }
 
@@ -278,12 +268,15 @@ export class SyncloPanelView extends ItemView {
    *  loaded. */
   private fade(f: Fader, address: string | null): void {
     if (f.shown !== address) {
+      // The same picture already on screen under a fresh signature is kept,
+      // never loaded again.
+      const same = !!address && !!f.shown && !f.loading && imageKey(address) === imageKey(f.shown) && (f.a.hasClass("is-on") || f.b.hasClass("is-on"));
       f.shown = address;
       if (!address) {
         f.loading = null;
         f.a.removeClass("is-on");
         f.b.removeClass("is-on");
-      } else {
+      } else if (!same) {
         const off = f.a.hasClass("is-on") ? f.b : f.a;
         f.loading = off;
         off.setAttribute("src", address);
@@ -305,12 +298,13 @@ export class SyncloPanelView extends ItemView {
     this.render();
   }
 
-  /** The presentation once there is one: from the panel's answer, else
-   *  from the job runner's; none once it isn't in the workspace. */
   private presentation(): RunnerDocument | null {
-    const w = this.watch;
-    if (!w || w.card?.gone || w.stopped?.reason === "gone") return null;
-    return w.card?.document ?? w.runnerDocument;
+    return presentationOf(this.watch);
+  }
+
+  private openViewer(): void {
+    if (!this.target || this.heroAt === null) return;
+    void this.host.openDeck(this.target, this.heroAt);
   }
 
   private download(format: "pptx" | "pdf"): void {
@@ -318,24 +312,6 @@ export class SyncloPanelView extends ItemView {
     if (!doc || !this.target) return;
     const note = this.app.vault.getFileByPath(this.target.notePath);
     void this.host.download(doc.id, format, note, doc.title);
-  }
-
-  /** What to say once there is no more to follow, if that is so. */
-  private final(): Final | null {
-    const w = this.watch;
-    const card = w?.card ?? null;
-    if (card?.gone || w?.stopped?.reason === "gone") return { message: NOT_FOUND_MESSAGE, action: null };
-    if (card?.status === "failed") {
-      if (card.error?.code === "insufficient_credits") {
-        return { message: MESSAGES.outOfCredits, action: { label: "Get more credits", run: () => this.host.openExternal(this.host.creditsUrl()) } };
-      }
-      return { message: card.error?.message || "The presentation couldn't be made.", action: null };
-    }
-    const stopped = w?.stopped;
-    if (!stopped) return null;
-    if (stopped.reason === "signed-out") return { message: MESSAGES.signedOut, action: { label: "Connect", run: () => void this.host.connect() }, connect: true };
-    if (stopped.reason === "scope") return { message: stopped.error.message, action: { label: "Connect again", run: () => void this.host.connect() }, connect: true };
-    return { message: stopped.error.message, action: null };
   }
 
   private render(): void {
@@ -353,7 +329,7 @@ export class SyncloPanelView extends ItemView {
     // (the status bar reads the same).
     const progress = this.host.progressBoard.get(target.generationId) ?? (card ? cardProgressInput(card) : progressInputOf(null));
     const words = progressWords(progress, format, name, false);
-    const final = this.final();
+    const final = finalOf(this.host, w);
     const doc = this.presentation();
     // Finished when either answer says so.
     const done = card?.status === "completed" || progress.status === "completed";
@@ -401,7 +377,18 @@ export class SyncloPanelView extends ItemView {
     p.next.setAttribute("aria-label", `Next ${unit(format, 1)}`);
     p.prev.toggle(done && slides.length > 1);
     p.next.toggle(done && slides.length > 1);
-    p.cap.setText(shown ? `${one} ${(at ?? 0) + 1} · ${shown.title}` : "");
+    const caption = shown ? `${one} ${(at ?? 0) + 1} · ${shown.title}` : "";
+    p.cap.setText(caption);
+    // The large slide is the way into the deck viewer.
+    this.heroAt = shown ? (at ?? 0) : null;
+    p.opener.toggle(!!shown);
+    if (shown) {
+      p.opener.setAttribute("role", "button");
+      p.opener.setAttribute("tabindex", "0");
+      p.opener.setAttribute("aria-label", caption);
+    } else {
+      for (const attr of ["role", "tabindex", "aria-label"]) p.opener.removeAttribute(attr);
+    }
 
     // A Connect shown opens the sign-in in the same moment as the click.
     if (final?.connect && !this.connectReady) this.host.prepareConnect();

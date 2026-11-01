@@ -53,6 +53,9 @@ export interface SyncloHost {
   /** The deck as the Synclo panels see it, asked about once for all of
    *  them. */
   deckWatch(target: PendingJob): DeckWatch;
+  /** Opens the deck viewer at a slide, in a tab of the main area (the
+   *  deck's tab if it has one already). */
+  openDeck(target: PendingJob, slide: number): Promise<void>;
   /** Opens the Synclo panel (or brings it forward). */
   revealPanel(): Promise<void>;
   /** Opens the make window for the note in front. */

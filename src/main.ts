@@ -11,15 +11,18 @@ import { ProgressBoard } from "./jobs/progress-board";
 import { GIVE_UP_MS, JobRunner, type Timers } from "./jobs/runner";
 import { obsidianHttp } from "./obsidian/http";
 import { cardProgressInput } from "./panel/model";
+import { deckStateOf, deckStateRecord } from "./panel/viewer";
 import { DeckWatch } from "./panel/watch";
 import { secretStore } from "./obsidian/secrets";
 import { DEFAULT_SETTINGS, parseSettings, type SyncloSettings } from "./settings";
 import { FindModal } from "./ui/find-modal";
 import { MakeModal, makeWindowOpen } from "./ui/make-modal";
 import { richContent, richNotice, type NoticeAction } from "./ui/notices";
+import { DECK_VIEW, SyncloDeckView } from "./ui/deck-view";
 import { PANEL_VIEW, SyncloPanelView } from "./ui/panel-view";
 import { ProgressView } from "./ui/progress";
 import { SyncloSettingTab } from "./ui/settings-tab";
+import { presentationOf } from "./ui/views";
 
 /** A workspace as jobs remember it. */
 function workspaceOf(account: Account): WorkspaceRef {
@@ -95,6 +98,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     this.settingsTab = new SyncloSettingTab(this, this);
     this.addSettingTab(this.settingsTab);
     this.registerView(PANEL_VIEW, (leaf) => new SyncloPanelView(leaf, this));
+    this.registerView(DECK_VIEW, (leaf) => new SyncloDeckView(leaf, this));
     this.registerObsidianProtocolHandler("synclo-auth", (params) => void this.onSignInReturn(params));
     this.register(
       this.session.onChange((signedIn, reason) => {
@@ -250,12 +254,30 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
   private setPanelTarget(job: PendingJob): void {
     this.app.saveLocalStorage(PANEL_KEY, job);
     this.eachPanel((view) => view.show(job));
-    // Only the deck the panels show is watched.
+    // Only the decks a view shows, and the panel's, are watched.
     for (const [id, watch] of this.watches) {
-      if (id === job.generationId) continue;
+      if (id === job.generationId || watch.inUse) continue;
       watch.stop();
       this.watches.delete(id);
     }
+  }
+
+  async openDeck(target: PendingJob, slide: number): Promise<void> {
+    const { workspace } = this.app;
+    // The deck's title as Synclo names it, for the tab.
+    const watch = this.watches.get(target.generationId);
+    const title = presentationOf(watch ?? null)?.title || watch?.card?.title || target.title;
+    const state = deckStateRecord({ job: { ...target, title }, slide });
+    const leaf = workspace.getLeavesOfType(DECK_VIEW).find((l) => deckStateOf(l.getViewState().state)?.job.generationId === target.generationId) ?? workspace.getLeaf("tab");
+    await leaf.setViewState({ type: DECK_VIEW, state, active: true });
+    await workspace.revealLeaf(leaf);
+    // On a phone the panel's drawer would cover it.
+    if (Platform.isMobile) {
+      for (const side of [workspace.leftSplit, workspace.rightSplit]) {
+        if (!side.collapsed && workspace.getLeavesOfType(PANEL_VIEW).some((l) => l.getRoot() === side)) side.collapse();
+      }
+    }
+    if (leaf.view instanceof SyncloDeckView) leaf.view.focusSlides();
   }
 
   deckWatch(target: PendingJob): DeckWatch {
