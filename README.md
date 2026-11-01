@@ -29,7 +29,7 @@ Synclo, and download it into your vault as PowerPoint or PDF.
 | Make a presentation from the selection | The same, for the selected text only. |
 | Download this note's presentation as PowerPoint | Makes a `.pptx` of the note's presentation and saves it in the vault. |
 | Download this note's presentation as PDF | The same, as a PDF. |
-| Open this note's presentation | Opens it in Synclo, where you edit, present and share it. |
+| Open this note's presentation in Synclo | Opens it in your browser, where you edit, present and share it. |
 | Find a presentation | Searches your Synclo presentations; insert a link to one, download it, or open it. |
 
 The make command is also on the ribbon, in a note's file menu and in the editor's
