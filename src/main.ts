@@ -1,5 +1,5 @@
 import { MarkdownView, Notice, Platform, Plugin, TFile, normalizePath, type Editor, type MarkdownFileInfo, type Menu, type TAbstractFile } from "obsidian";
-import { messageFor } from "./api/errors";
+import { MESSAGES, messageFor } from "./api/errors";
 import { McpClient } from "./api/mcp";
 import { SyncloApi, documentIdOf, type Account, type FileFormat, type Generation, type Theme } from "./api/synclo";
 import { DEFAULT_BASE, normalizeBase } from "./auth/oauth";
@@ -153,8 +153,11 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
   }
 
   async disconnect(): Promise<void> {
+    const making = this.runner.list().filter((j) => j.base === this.base());
     await this.session.signOut();
-    new Notice("Disconnected from Synclo on this device.");
+    if (making.length === 1) new Notice(`Disconnected. “${making[0]?.title || "Your presentation"}” is still being made; connect again to get its link.`);
+    else if (making.length > 1) new Notice(`Disconnected. ${making.length} presentations are still being made; connect again to get their links.`);
+    else new Notice("Disconnected from Synclo on this device.");
   }
 
   async account(force = false): Promise<Account | null> {
@@ -283,8 +286,8 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
       working.hide();
       // With no note it belongs to, a file goes to the attachment folder.
       const attachments = !near || this.settings.saveTo === "attachments";
-      const place = attachments ? "In your attachments folder" : "Next to this note";
-      const where = linked ? (attachments ? `${place}; the link is in the note's properties.` : `${place}; the link is in its properties.`) : `${place}.`;
+      const place = attachments ? "In your attachments folder" : "In the note's folder";
+      const where = linked ? (attachments ? `${place}, and linked in the note's properties.` : `${place}, and linked in its properties.`) : `${place}.`;
       richNotice({
         title: `Saved “${saved.name}”`,
         line: where,
@@ -377,7 +380,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     if (!(file instanceof TFile) || file.extension !== "md") return;
     menu.addItem((item) =>
       item
-        .setTitle("Make a presentation with Synclo")
+        .setTitle("Make a Synclo presentation")
         .setIcon("presentation")
         .onClick(() => this.make(file)),
     );
@@ -385,7 +388,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     if (link) {
       menu.addItem((item) =>
         item
-          .setTitle("Open presentation in Synclo")
+          .setTitle("Open its presentation in Synclo")
           .setIcon("external-link")
           .onClick(() => this.openExternal(link)),
       );
@@ -405,9 +408,18 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     } else {
       menu.addItem((item) =>
         item
-          .setTitle("Make a presentation with Synclo")
+          .setTitle("Make a Synclo presentation")
           .setIcon("presentation")
           .onClick(() => this.make(file)),
+      );
+    }
+    const link = this.linkOf(file);
+    if (link) {
+      menu.addItem((item) =>
+        item
+          .setTitle("Open its presentation in Synclo")
+          .setIcon("external-link")
+          .onClick(() => this.openExternal(link)),
       );
     }
   }
@@ -506,7 +518,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
         return;
       }
       case "stale":
-        new Notice("That sign-in link was already used or has expired. Connect again from the plugin's settings.");
+        new Notice(MESSAGES.signInStale);
         return;
     }
   }

@@ -95,7 +95,7 @@ export function progressText(job: PendingJob, gen: Generation | null): ProgressT
   }
   if (written < total) return { title, line: `${written} of ${total} ${unit(job.format, total)} written`, short: `${written} of ${total} ${unit(job.format, total)}` };
   if (p.pictures && p.pictures.total > 0 && p.pictures.made < p.pictures.total) {
-    return { title, line: `Adding pictures: ${p.pictures.made} of ${p.pictures.total}`, short: `pictures ${p.pictures.made} of ${p.pictures.total}` };
+    return { title, line: `Adding images: ${p.pictures.made} of ${p.pictures.total}`, short: `images ${p.pictures.made} of ${p.pictures.total}` };
   }
   if (p.step === "checking") return { title, line: `Checking every ${unit(job.format, 1)}…`, short: "checking" };
   return { title, line: "Finishing…", short: "finishing" };

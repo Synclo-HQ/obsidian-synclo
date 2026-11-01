@@ -17,7 +17,7 @@ describe("progress in words", () => {
     const writing = gen({ status: "running", progress: { slides: [], written: 4, total: 9 } });
     expect(progressText(job(), writing).line).toBe("4 of 9 slides written");
     const pictures = gen({ status: "running", progress: { slides: [], written: 9, total: 9, pictures: { made: 3, total: 6 } } });
-    expect(progressText(job(), pictures).line).toBe("Adding pictures: 3 of 6");
+    expect(progressText(job(), pictures).line).toBe("Adding images: 3 of 6");
     expect(progressText(job({ format: "document" }), gen({ status: "running", progress: { slides: [], written: 1, total: 5 } })).line).toBe("1 of 5 sections written");
   });
 

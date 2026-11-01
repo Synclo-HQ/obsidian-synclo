@@ -36,7 +36,8 @@ export class SyncloError extends Error {
 }
 
 export const MESSAGES = {
-  signedOut: "Connect Synclo to continue. You'll find Connect in the plugin's settings.",
+  signedOut: "Connect Synclo to continue. You'll find Connect in Settings › Synclo.",
+  signInStale: "That sign-in link was already used or has expired. Connect again from Settings › Synclo.",
   signInEnded: "Your Synclo sign-in has ended. Connect again to keep going.",
   unavailable: "Synclo is briefly unavailable. Try again in a moment.",
   network: "Synclo couldn't be reached. Check your connection and try again.",

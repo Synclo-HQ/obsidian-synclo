@@ -67,7 +67,7 @@ describe("comments inside and outside code fences", () => {
     expect(text).toContain("`%%kept%%`");
     expect(text).not.toContain("TABLE status");
     expect(text).not.toContain("dv.pages");
-    expect(describeLeftOut(m.leftOut)).toBe("1 Bases view, 5 Dataview queries, 1 search query, 1 Tasks query, private comments");
+    expect(describeLeftOut(m.leftOut)).toBe("1 Bases view, 5 Dataview queries, 1 search query, 1 Tasks query, comments");
   });
 });
 
@@ -97,9 +97,9 @@ describe("pictures in both syntaxes", () => {
     ]);
     expect(m.remotePictures).toBe(1);
     expect(describeLeftOut(m.leftOut)).toBe(
-      "1 PDF, 1 canvas, 1 drawing, 1 audio file, 1 video, 1 GIF, 1 SVG image, 1 picture over 8 MB, 1 picture written into the note as data, 2 pictures not found in the vault",
+      "1 PDF, 1 canvas, 1 drawing, 1 audio file, 1 video, 1 GIF, 1 SVG image, 1 image over 8 MB, 1 image written into the note as data, 2 images not found in the vault",
     );
-    expect(previewText(m)).toContain("[Picture: Architecture diagram]");
+    expect(previewText(m)).toContain("[Image: Architecture diagram]");
   });
 
   it("keeps the Excalidraw drawing's words and nothing of its data", async () => {
@@ -176,7 +176,7 @@ describe("a selection", () => {
     const note = fixtureNote("Short note.md");
     const m = await buildMaterial({ ...note, markdown: "still private %% Shown words.", selection: true, before: "Intro %% private start\n" }, fixtureReader, { includeLinked: false });
     expect(m.text).toBe("# Short note\n\nShown words.");
-    expect(describeLeftOut(m.leftOut)).toBe("private comments");
+    expect(describeLeftOut(m.leftOut)).toBe("comments");
   });
 
   it("closes a code block a selection ends inside", async () => {

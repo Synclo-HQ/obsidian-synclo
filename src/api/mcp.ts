@@ -77,7 +77,7 @@ export class McpClient {
     if (res.status === 429) throw new SyncloError("rate-limited", description || MESSAGES.rateLimited, { retryAfter: retryAfterOf(res, this.deps.now()) ?? 600 });
     if (res.status === 503 || res.status >= 500) throw new SyncloError("unavailable", MESSAGES.unavailable);
     const code = typeof err.error === "string" ? err.error : `http_${res.status}`;
-    throw new SyncloError("rejected", description || "Synclo couldn't take this picture.", { code });
+    throw new SyncloError("rejected", description || "Synclo couldn't take this image.", { code });
   }
 
   private async post(body: string, token: string, timeoutMs: number): Promise<HttpResponse> {

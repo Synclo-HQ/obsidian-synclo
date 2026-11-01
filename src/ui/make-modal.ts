@@ -21,7 +21,7 @@ export function makeWindowOpen(): boolean {
 /** A control's name on its element, so a redraw can give it focus back. */
 const CONTROL = "data-synclo-control";
 
-export const PRIVACY_LINE = "Only this note (and anything you chose to include) is sent to Synclo when you click Make. Nothing else in your vault is read.";
+export const PRIVACY_LINE = "Only what's shown above is sent to Synclo, and only when you click Make. Nothing else in your vault is read.";
 const CREDITS_PER_SLIDE = 10;
 
 export interface MakeSource {
@@ -240,16 +240,26 @@ export class MakeModal extends Modal {
     el.createDiv({ cls: "synclo-summary-title", text: m.title });
     const pictures = m.pictures.length + m.remotePictures;
     const parts = [`${m.words.toLocaleString()} ${m.words === 1 ? "word" : "words"}`];
-    if (pictures) parts.push(`${pictures} ${pictures === 1 ? "picture" : "pictures"}`);
+    if (pictures) parts.push(`${pictures} ${pictures === 1 ? "image" : "images"}`);
     if (m.linkedNotes.length) parts.push(`${m.linkedNotes.length} linked ${m.linkedNotes.length === 1 ? "note" : "notes"}`);
     el.createDiv({ cls: "synclo-summary-line", text: parts.join(" · ") });
     if (m.linkedNotes.length) el.createDiv({ cls: "synclo-summary-detail", text: `Linked notes: ${m.linkedNotes.join(", ")}` });
     const left = describeLeftOut(m.leftOut);
     if (left) el.createDiv({ cls: "synclo-summary-detail synclo-left-out", text: `Left out: ${left}` });
     if (m.mostlyLinks) el.createDiv({ cls: "synclo-hint", text: "This note is mostly links. Turn on Include linked notes to send what those notes say." });
+    const existing: unknown = this.host.app.metadataCache.getFileCache(this.source.file)?.frontmatter?.synclo;
+    if (typeof existing === "string" && /^https?:\/\//.test(existing)) {
+      const hint = el.createDiv({ cls: "synclo-hint" });
+      hint.appendText("This note already has a presentation. Making another replaces its link. ");
+      const open = hint.createEl("a", { text: "Open it", href: existing });
+      open.addEventListener("click", (e) => {
+        e.preventDefault();
+        this.host.openExternal(existing);
+      });
+    }
     if (this.mode() === "generate") {
-      const pics = m.pictures.length ? " Its pictures aren't sent." : "";
-      el.createDiv({ cls: "synclo-hint", text: `This note is short, so Synclo will write the ${unit(this.choices.format, 2)} from it as a brief.${pics}` });
+      const pics = m.pictures.length ? " Images in it aren't used." : "";
+      el.createDiv({ cls: "synclo-hint", text: `This note is short, so Synclo will treat it as a topic and write the ${unit(this.choices.format, 2)} itself.${pics}` });
     }
     const tooLong = this.tooLong();
     if (tooLong) el.createDiv({ cls: "synclo-warning", text: tooLong });
@@ -258,7 +268,7 @@ export class MakeModal extends Modal {
     toggle.toggleClass("is-open", this.previewOpen);
     toggle.setAttribute("aria-expanded", String(this.previewOpen));
     setIcon(toggle.createSpan({ cls: "synclo-disclosure-icon" }), "chevron-right");
-    toggle.createSpan({ text: "Preview the text" });
+    toggle.createSpan({ text: "Preview what's sent" });
     toggle.addEventListener("click", () => {
       this.previewOpen = !this.previewOpen;
       this.renderSummary();
@@ -324,9 +334,9 @@ export class MakeModal extends Modal {
     this.host.prepareConnect();
     const box = el.createDiv({ cls: "synclo-connect" });
     if (this.waitingForSignIn) {
-      box.createDiv({ text: "Finish signing in in your browser. This window picks up where you left off when you come back." });
+      box.createDiv({ text: "Finish signing in to Synclo in your browser. This window picks up where you left off when you come back." });
     } else {
-      box.createDiv({ text: "Connect Synclo to make presentations from your notes. You sign in at synclo.app; a free account comes with 400 credits." });
+      box.createDiv({ text: "Connect your Synclo account to make presentations from your notes. New accounts get 400 free credits." });
     }
     footer.createDiv({ cls: "synclo-privacy", text: PRIVACY_LINE });
     const row = footer.createDiv({ cls: "synclo-buttons" });
@@ -366,15 +376,15 @@ export class MakeModal extends Modal {
         this.renderBody();
       });
     });
-    if (account?.slidesPerPrompt) length.setDesc(`Your plan makes up to ${account.slidesPerPrompt} ${unit(c.format, account.slidesPerPrompt)} at a time.`);
+    if (account?.slidesPerPrompt) length.setDesc(`Your plan allows up to ${account.slidesPerPrompt} ${unit(c.format, account.slidesPerPrompt)} per ${c.format === "document" ? "document" : "presentation"}.`);
 
     if (!generate) {
       new Setting(el)
         .setName("Words")
-        .setDesc(c.keepWords ? "Every word of the note is kept as written." : "Synclo tightens the wording and keeps every fact.")
+        .setDesc("Tighten the wording and keep every fact, or keep your words exactly as written.")
         .addDropdown((d) =>
           named(d.selectEl, "words", d)
-            .addOptions({ condense: "Let Synclo condense", preserve: "Keep my words" })
+            .addOptions({ condense: "Tighten the wording", preserve: "Keep my exact words" })
             .setValue(c.keepWords ? "preserve" : "condense")
             .onChange((v) => {
               c.keepWords = v === "preserve";
@@ -392,7 +402,7 @@ export class MakeModal extends Modal {
       d.setValue(c.theme).onChange((v) => (c.theme = v));
     });
 
-    new Setting(el).setName("Pictures").addDropdown((d) => {
+    new Setting(el).setName("Image style").addDropdown((d) => {
       named(d.selectEl, "pictures", d);
       for (const [id, label] of IMAGE_STYLES) d.addOption(id, label);
       d.setValue(IMAGE_STYLES.some(([id]) => id === c.imageStyle) ? c.imageStyle : "theme").onChange((v) => (c.imageStyle = v));
@@ -400,7 +410,7 @@ export class MakeModal extends Modal {
 
     new Setting(el)
       .setName("Include linked notes")
-      .setDesc("Also send the notes this note links to, one level deep.")
+      .setDesc("Also send the notes it links to directly.")
       .addToggle((t) =>
         named(t.toggleEl, "linked", t)
           .setValue(c.includeLinked)
@@ -413,7 +423,7 @@ export class MakeModal extends Modal {
     // "More choices": the same disclosure as "Preview the text".
     const toggle = el.createEl("button", { cls: "synclo-disclosure", attr: { [CONTROL]: "more" } });
     setIcon(toggle.createSpan({ cls: "synclo-disclosure-icon" }), "chevron-right");
-    toggle.createSpan({ text: "More choices" });
+    toggle.createSpan({ text: "More options" });
     const more = el.createDiv({ cls: "synclo-more" });
     const show = () => {
       toggle.toggleClass("is-open", this.moreOpen);
@@ -456,10 +466,13 @@ export class MakeModal extends Modal {
   private renderEstimate(el: HTMLElement): void {
     const c = this.choices;
     const balance = this.host.cachedAccount()?.balance ?? null;
-    const upTo = this.mode() === "generate" ? "" : "up to ";
-    const line = `Costs ${upTo}${this.credits().toLocaleString()} credits (${CREDITS_PER_SLIDE} a ${unit(c.format, 1)}).${balance !== null ? ` You have ${balance.toLocaleString()}.` : ""}`;
-    el.createDiv({ text: line });
-    if (balance !== null && balance < this.credits()) {
+    // No price on making (the app's rule): credits show only when they fall
+    // short of what this would take.
+    if (balance === null || balance >= this.credits()) {
+      el.remove();
+      return;
+    }
+    {
       const warn = el.createDiv({ cls: "synclo-warning" });
       warn.appendText(balance < CREDITS_PER_SLIDE ? "You're out of credits. " : `That's more than your ${balance.toLocaleString()} credits. Choose fewer ${unit(c.format, 2)}, or `);
       const a = warn.createEl("a", { text: balance < CREDITS_PER_SLIDE ? "Get more at synclo.app" : "get more at synclo.app", href: this.host.creditsUrl() });
@@ -540,7 +553,7 @@ export class MakeModal extends Modal {
       let skipped = 0;
       if (mode !== "generate" && m.pictures.length) {
         for (const [i, pic] of m.pictures.entries()) {
-          this.setBusy(`Sending pictures (${i + 1} of ${m.pictures.length})…`);
+          this.setBusy(`Sending images (${i + 1} of ${m.pictures.length})…`);
           const file = this.host.app.vault.getFileByPath(pic.file.path);
           if (!file) {
             skipped++;
@@ -561,7 +574,7 @@ export class MakeModal extends Modal {
       }
       if (this.closed) return;
       const input = mode === "generate" ? withPictures(m, new Map()) : withPictures(m, urls);
-      if (input.length > LIMITS.maxInputChars) throw new SyncloError("too-large", "With its pictures this is too long to send in one go. Make a presentation from a selection instead.");
+      if (input.length > LIMITS.maxInputChars) throw new SyncloError("too-large", "With its images this is too long to send in one go. Make a presentation from a selection instead.");
       this.setBusy("Starting…");
       asked = true;
       const started = await this.host.api.create({
@@ -579,7 +592,7 @@ export class MakeModal extends Modal {
       this.busy = false;
       this.close();
       if (already) this.host.runner.kick();
-      if (skipped) new Notice(`${skipped} of the note's pictures couldn't be sent, so Synclo is making it without them.`);
+      if (skipped) new Notice(`${skipped} of the note's images couldn't be sent, so Synclo is making it without them.`);
     } catch (err) {
       this.busy = false;
       this.busyText = null;

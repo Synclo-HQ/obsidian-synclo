@@ -344,7 +344,7 @@ export function previewText(material: Pick<Material, "text" | "placements" | "pi
   return material.text.replace(PICTURE_TOKENS, (_m, k: string) => {
     const place = material.placements[Number(k) - 1];
     const pic = place ? byN.get(place.picture) : undefined;
-    return place && pic ? `[Picture: ${place.alt || pic.file.basename}]` : "";
+    return place && pic ? `[Image: ${place.alt || pic.file.basename}]` : "";
   });
 }
 

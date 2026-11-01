@@ -39,10 +39,10 @@ describe("comments", () => {
     expect(clean("~~~~\n```\n%%x%%\n```\n~~~~").text).toBe("~~~~\n```\n%%x%%\n```\n~~~~");
   });
 
-  it("counts comments once as private comments", () => {
+  it("counts comments once once", () => {
     const r = clean("a %%b%% c\n\n<!-- d -->\n\n%%\ne\n%%");
     expect(r.text).toBe("a c");
-    expect(r.said).toBe("private comments");
+    expect(r.said).toBe("comments");
   });
 
   it("removes a comment inside a quote and keeps the quote whole", () => {

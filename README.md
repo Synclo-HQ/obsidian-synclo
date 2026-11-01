@@ -2,7 +2,7 @@
 
 Turn a note into a designed presentation with editable slides, or a document,
 and save it as PowerPoint or PDF in your vault. Your note's words, the notes it
-embeds and its own pictures come along; its comments, queries and properties
+embeds and its own images come along; its comments, queries and properties
 stay behind.
 
 [Synclo](https://synclo.app) is an AI presentation and document maker. This
@@ -39,26 +39,25 @@ Hotkeys settings.
 ### The make window
 
 Before anything leaves your vault, the window shows exactly what will be sent:
-the title, the number of words and pictures, the linked notes included, and a
+the title, the number of words and images, the linked notes included, and a
 **Left out** line that names what stays behind (for example "Left out: 1 PDF,
-1 Dataview query, private comments"). **Preview the text** shows the text
-itself.
+1 Dataview query, comments"). **Preview what's sent** shows the text itself.
 
 Then you choose:
 
-- **Format**: slides, or a document of sections.
-- **Length**: the most slides you want. Your plan sets how many Synclo makes at
-  a time (10 on the free plan).
-- **Words**: *Let Synclo condense* tightens the wording and keeps every fact;
-  *Keep my words* keeps every word as written. A note under 20 words is read as
-  a brief instead, and Synclo writes from it.
-- **Theme** and **Pictures**: one of your workspace's themes, or a look designed
-  for the note; and the style of the pictures Synclo makes.
-- **Include linked notes**: also send the notes this note links to, one level
-  deep (up to 10 notes).
-- **More choices**: the language, and instructions such as who it's for.
+- **Format**: slides or a document.
+- **Length**: the most slides Synclo makes, title slide included. Your plan
+  allows up to 10 slides per presentation on the Free plan.
+- **Words**: *Tighten the wording* keeps every fact and shortens the
+  sentences; *Keep my exact words* keeps every word as written. A note under 20
+  words is treated as a topic instead, and Synclo writes the slides itself.
+- **Theme** and **Image style**: a theme, or a look Synclo designs for the
+  note; and the style of the images Synclo creates.
+- **Include linked notes**: also send the notes it links to directly (up to 10
+  notes).
+- **More options**: the language, and instructions such as who it's for.
 
-The window shows the cost in credits beside your balance. Click **Make**.
+Click **Make**. If your credits fall short, the window says so before you start.
 
 ### While it's made
 
@@ -70,21 +69,22 @@ back to the front.
 
 When it's ready, its link is written into the note's properties as `synclo`,
 and a notice offers **Open in Synclo**, **Download PowerPoint** and **Download
-PDF**. Downloads go next to the note, or into your attachment folder (a
-setting). Existing files are never overwritten.
+PDF**. Downloads go in the note's folder, or in Obsidian's attachment folder
+(a setting), and are linked in the note's properties under `synclo files`.
+Existing files are never overwritten.
 
 ## What is sent, and when
 
 The plugin talks to Synclo only when you use it: when you run one of its
 commands, connect, or open its settings or make window; and, while a
 presentation you started is being made, to check on it. It talks only to Synclo
-(`https://synclo.app`, or the server address set under Advanced):
+(`https://synclo.app`):
 
 - **Connect** opens Synclo's sign-in page in your browser. Synclo sends you back
   to Obsidian, and the plugin exchanges a one-time code for its sign-in.
 - **Make** sends the note's text as the make window showed it, your choices, and
-  the note's own pictures (PNG, JPEG or WebP up to 8 MB; up to 20). Only the
-  note you chose is read, plus the notes and pictures it embeds and, if you turn
+  the note's own images (PNG, JPEG or WebP up to 8 MB; up to 20). Only the
+  note you chose is read, plus the notes and images it embeds and, if you turn
   it on, the notes it links to. Nothing else in your vault is read.
 - **Never sent:** frontmatter and properties (except the `title`, which names
   the deck), `%%comments%%` and `<!-- comments -->`, tags, block ids, Dataview,

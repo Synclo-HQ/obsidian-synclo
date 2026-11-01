@@ -115,11 +115,11 @@ export class SyncloSettingTab extends PluginSettingTab {
     return [
       { rows: [this.connectionRow()] },
       {
-        heading: "New presentations",
+        heading: "Defaults for new presentations",
         rows: [
           {
             name: "Format",
-            desc: "Slides, or a document of sections.",
+            desc: "",
             render: (setting) => {
               setting.addDropdown((d) =>
                 d
@@ -135,7 +135,7 @@ export class SyncloSettingTab extends PluginSettingTab {
           },
           {
             name: "Length",
-            desc: "At most this many, the opening included. A note with less to say makes fewer.",
+            desc: s.format === "document" ? "The most sections Synclo writes. A short note may get fewer." : "The most slides Synclo makes, title slide included. A short note may get fewer.",
             render: (setting) => {
               setting.addDropdown((d) => {
                 const account = this.host.cachedAccount();
@@ -149,11 +149,11 @@ export class SyncloSettingTab extends PluginSettingTab {
           },
           {
             name: "Words",
-            desc: "Keep the note's words as written, or let Synclo tighten them while keeping every fact.",
+            desc: "Tighten the wording and keep every fact, or keep your words exactly as written.",
             render: (setting) => {
               setting.addDropdown((d) =>
                 d
-                  .addOptions({ condense: "Let Synclo condense", preserve: "Keep my words" })
+                  .addOptions({ condense: "Tighten the wording", preserve: "Keep my exact words" })
                   .setValue(s.keepWords ? "preserve" : "condense")
                   .onChange((v) => {
                     s.keepWords = v === "preserve";
@@ -164,10 +164,10 @@ export class SyncloSettingTab extends PluginSettingTab {
           },
           {
             name: "Theme",
-            desc: "Your workspace's own themes are listed after Synclo's.",
+            desc: "Choose a theme, or let Synclo design a look for each note.",
             render: (setting) => {
               const themes = this.host.cachedThemes();
-              if (!themes) setting.setDesc("Connect to choose from your themes.");
+              if (!themes) setting.setDesc(!this.host.session.isSignedIn() ? "Connect to choose from your themes." : this.refreshedAt && !this.refreshing ? "Your themes couldn't be loaded right now." : "Choose a theme, or let Synclo design a look for each note.");
               setting.addDropdown((d) => {
                 d.addOption("", "Designed for each note");
                 for (const t of themes ?? []) d.addOption(t.id, t.name);
@@ -180,8 +180,8 @@ export class SyncloSettingTab extends PluginSettingTab {
             },
           },
           {
-            name: "Pictures",
-            desc: "The style of pictures Synclo makes. Your note's own pictures are used as they are.",
+            name: "Image style",
+            desc: "The style of the images Synclo creates. Images in your note are used as they are.",
             render: (setting) => {
               setting.addDropdown((d) => {
                 for (const [id, label] of IMAGE_STYLES) d.addOption(id, label);
@@ -194,7 +194,7 @@ export class SyncloSettingTab extends PluginSettingTab {
           },
           {
             name: "Include linked notes",
-            desc: "Also send the notes a note links to, one level deep. You can change this each time.",
+            desc: "Also send the notes it links to directly. You can change this each time.",
             render: (setting) => {
               setting.addToggle((t) =>
                 t.setValue(s.includeLinked).onChange((v) => {
@@ -210,12 +210,12 @@ export class SyncloSettingTab extends PluginSettingTab {
         heading: "Downloads",
         rows: [
           {
-            name: "Save files",
-            desc: "Where PowerPoint and PDF files go. The attachment folder is the one Obsidian uses for new attachments.",
+            name: "Save downloads to",
+            desc: "Where PowerPoint and PDF files are saved.",
             render: (setting) => {
               setting.addDropdown((d) =>
                 d
-                  .addOptions({ "note-folder": "Next to the note", attachments: "In the attachment folder" })
+                  .addOptions({ "note-folder": "The note's folder", attachments: "Obsidian's attachment folder" })
                   .setValue(s.saveTo)
                   .onChange((v) => {
                     s.saveTo = v === "attachments" ? "attachments" : "note-folder";
@@ -226,7 +226,9 @@ export class SyncloSettingTab extends PluginSettingTab {
           },
         ],
       },
-      {
+      // Only for development: shown once the address has been changed in the
+      // plugin's data, so it can be put back.
+      ...(normalizeBase(s.base) === DEFAULT_BASE ? [] : ([{
         heading: "Advanced",
         rows: [
           {
@@ -253,7 +255,7 @@ export class SyncloSettingTab extends PluginSettingTab {
             },
           },
         ],
-      },
+      }] as Section[])),
     ];
   }
 
@@ -268,7 +270,7 @@ export class SyncloSettingTab extends PluginSettingTab {
           setting.setDesc(
             createFragment((f) => {
               if (account && account.balance !== null) f.appendText(`${account.balance.toLocaleString()} credits. `);
-              if (account?.slidesPerPrompt) f.appendText(`Up to ${account.slidesPerPrompt} slides at a time. `);
+              if (account?.slidesPerPrompt) f.appendText(`Your plan allows up to ${account.slidesPerPrompt} slides per presentation. `);
               const a = f.createEl("a", { text: "Get more credits", href: this.host.creditsUrl() });
               a.addEventListener("click", (e) => {
                 e.preventDefault();
@@ -282,7 +284,6 @@ export class SyncloSettingTab extends PluginSettingTab {
               await this.host.disconnect();
               this.redraw();
             });
-            b.buttonEl.addClass("mod-warning");
           });
           return;
         }
@@ -290,8 +291,8 @@ export class SyncloSettingTab extends PluginSettingTab {
         setting.setName("Synclo account");
         setting.setDesc(
           this.signingIn
-            ? "Finish signing in in your browser. Obsidian comes back here when you're done."
-            : "Connect to make presentations from your notes. You sign in at synclo.app; a free account comes with 400 credits.",
+            ? "Finish signing in to Synclo in your browser. You'll come back here when you're done."
+            : "Connect your Synclo account to make presentations from your notes. New accounts get 400 free credits.",
         );
         setting.addButton((b) =>
           b

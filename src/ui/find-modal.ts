@@ -104,8 +104,8 @@ class FoundModal extends SuggestModal<FoundAction> {
           ]
         : []),
       { label: "Open in Synclo", icon: "external-link", run: () => host.openExternal(p.editUrl) },
-      { label: "Download as PowerPoint", icon: "presentation", run: () => void host.download(p.id, "pptx", owner, p.title) },
-      { label: "Download as PDF", icon: "file-text", run: () => void host.download(p.id, "pdf", owner, p.title) },
+      { label: "Download PowerPoint", icon: "presentation", run: () => void host.download(p.id, "pptx", owner, p.title) },
+      { label: "Download PDF", icon: "file-text", run: () => void host.download(p.id, "pdf", owner, p.title) },
     ];
   }
 
