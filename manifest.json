@@ -1,7 +1,7 @@
 {
   "id": "synclo",
   "name": "Synclo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "1.11.4",
   "description": "Turn your notes into designed presentations with Synclo, then download them as PowerPoint or PDF.",
   "author": "Synclo Inc",

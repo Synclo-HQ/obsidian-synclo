@@ -1,6 +1,6 @@
 {
   "name": "synclo-obsidian",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Turn an Obsidian note into a designed, editable presentation or document with Synclo, and save it as PowerPoint or PDF in your vault.",
   "private": true,
   "type": "module",
