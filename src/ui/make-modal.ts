@@ -523,6 +523,16 @@ export class MakeModal extends Modal {
   }
 
   private busyText: string | null = null;
+  /** One press of Make, named for Synclo: pressed again with the same
+   *  request (after an error), it's the same press; anything changed, or a
+   *  new window, is a new press and a new deck. */
+  private press: { id: string; request: string } | null = null;
+
+  private pressId(request: Record<string, unknown>): string {
+    const key = JSON.stringify(request);
+    if (!this.press || this.press.request !== key) this.press = { id: newPressId(), request: key };
+    return this.press.id;
+  }
 
   private setBusy(text: string | null): void {
     this.busy = text !== null;
@@ -581,7 +591,7 @@ export class MakeModal extends Modal {
       if (input.length > LIMITS.maxInputChars) throw new SyncloError("too-large", "With its images this is too long to send in one go. Make a presentation from a selection instead.");
       this.setBusy("Starting…");
       asked = true;
-      const started = await this.host.api.create({
+      const request = {
         input,
         mode,
         format: c.format,
@@ -590,7 +600,8 @@ export class MakeModal extends Modal {
         image_style: c.imageStyle && c.imageStyle !== "theme" ? c.imageStyle : undefined,
         language: c.language || undefined,
         instructions: c.instructions || undefined,
-      });
+      };
+      const started = await this.host.api.create({ ...request, request_id: this.pressId(request) });
       const already = this.host.runner.list().some((j) => j.generationId === started.generationId);
       this.host.startJob({ generationId: started.generationId, notePath: this.source.file.path, title: m.title, format: c.format, base: this.host.base(), startedAt: Date.now() });
       this.busy = false;
@@ -629,4 +640,11 @@ export class MakeModal extends Modal {
 function named<T>(el: HTMLElement, name: string, component: T): T {
   el.setAttribute(CONTROL, name);
   return component;
+}
+
+/** 32 random letters and digits (crypto.randomUUID isn't on every phone). */
+function newPressId(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }

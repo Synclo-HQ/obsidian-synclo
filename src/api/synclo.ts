@@ -88,6 +88,9 @@ export interface CreateArgs {
   image_style?: string;
   language?: string;
   instructions?: string;
+  /** Names one press of Make: Synclo returns the first generation for the
+   *  same id (a retried press), and a new id always makes a new deck. */
+  request_id?: string;
 }
 
 const str = (x: unknown, fallback = ""): string => (typeof x === "string" ? x : fallback);
@@ -171,6 +174,7 @@ export class SyncloApi {
     if (args.image_style) clean.image_style = args.image_style;
     if (args.language?.trim()) clean.language = args.language.trim().slice(0, 60);
     if (args.instructions?.trim()) clean.instructions = args.instructions.trim().slice(0, 2000);
+    if (args.request_id) clean.request_id = args.request_id;
     const r = await this.mcp.call("create_presentation", clean, { timeoutMs: 90_000 });
     if (typeof r.generation_id !== "string") throw malformed("no generation id");
     return { generationId: r.generation_id, status: parseStatus(r.status), creditsEstimated: num(r.credits_estimated) };
