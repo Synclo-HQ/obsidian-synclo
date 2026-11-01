@@ -1,6 +1,5 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import obsidianmd from "eslint-plugin-obsidianmd";
-import tseslint from "typescript-eslint";
 
 export default defineConfig([
   globalIgnores(["node_modules/", "main.js", "coverage/"]),
@@ -20,6 +19,7 @@ export default defineConfig([
   {
     // Build scripts run in Node, never inside Obsidian.
     files: ["esbuild.config.mjs", "version-bump.mjs", "vitest.config.mts"],
+    languageOptions: { globals: { process: "readonly" } },
     rules: {
       "obsidianmd/no-nodejs-modules": "off",
       "import/no-extraneous-dependencies": "off",
@@ -28,7 +28,7 @@ export default defineConfig([
   {
     // Tests run in Node with vitest; they hold the plugin's pure modules to account.
     files: ["tests/**/*.ts"],
-    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: { globals: { process: "readonly", __dirname: "readonly" } },
     rules: {
       "obsidianmd/no-nodejs-modules": "off",
       "obsidianmd/no-global-this": "off",

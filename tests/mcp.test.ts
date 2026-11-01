@@ -17,6 +17,8 @@ function client(handler: Handler) {
 }
 
 const isToken = (r: { url: string }) => r.url.endsWith("/oauth/token");
+/** The tool arguments a request sent. */
+const argsOf = (r: { body?: string | ArrayBuffer }) => (JSON.parse(r.body as string) as { params: { arguments: Record<string, unknown> } }).params.arguments;
 
 describe("calling a tool", () => {
   it("sends one JSON-RPC message with the bearer token", async () => {
@@ -107,20 +109,20 @@ describe("generations", () => {
       }),
     );
     const g = await api.generation("gen_1", 30);
-    expect(JSON.parse(requests[0]!.body as string).params.arguments).toEqual({ generation_id: "gen_1", wait_seconds: 30 });
+    expect(argsOf(requests[0]!)).toEqual({ generation_id: "gen_1", wait_seconds: 30 });
     expect(requests[0]!.timeoutMs).toBe(60_000);
     expect(g.progress).toEqual({ step: "writing", title: "Q3 review", slides: [{ title: "Opening", written: true }, { title: "Results", written: false }], written: 1, total: 2, pictures: null });
   });
 
   it("asks again without wait_seconds when a server refuses it", async () => {
     const { api, requests } = client((req) => {
-      const args = JSON.parse(req.body as string).params.arguments;
+      const args = argsOf(req);
       if ("wait_seconds" in args) return { status: 200, body: { jsonrpc: "2.0", id: 1, error: { code: -32602, message: 'Invalid arguments for get_generation: unknown argument "wait_seconds".' } } };
       return rpcResult({ id: "gen_1", status: "queued" });
     });
     expect((await api.generation("gen_1", 30)).status).toBe("queued");
     await api.generation("gen_1", 30);
-    expect(requests.map((r) => "wait_seconds" in JSON.parse(r.body as string).params.arguments)).toEqual([true, false, false]);
+    expect(requests.map((r) => "wait_seconds" in argsOf(r))).toEqual([true, false, false]);
   });
 
   it("reads a finished generation", () => {

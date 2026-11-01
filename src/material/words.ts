@@ -37,7 +37,7 @@ export function readableWordCount(text: string): number {
   const plain = text
     .replace(/!\[[^\]\n]*\]\([^)\n]*\)/g, " ")
     .replace(/\]\([^)\n]*\)/g, "] ")
-    .replace(/\u0000[EP]\d+\u0000/g, " ")
+    .replace(/\uE000[EP]\d+\uE001/g, " ")
     .replace(/https?:\/\/\S+/g, " ");
   const seg = wordSegmenter();
   if (!seg) return serverWordCount(plain.replace(/[#>*_`~|[\]-]+/g, " "));

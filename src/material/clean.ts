@@ -7,7 +7,7 @@ import { isExternal, linkDisplay, parseMarkdownTarget, parseWikiInner } from "./
  * searched for comments or tags), math blocks, `%%comments%%` and
  * `<!-- comments -->` (never sent, inline or across lines), and inline
  * code spans. Nothing here reads the vault: an embed or a local picture
- * becomes a placeholder (`\u0000E<n>\u0000`) that build.ts resolves.
+ * becomes a placeholder (see MARK below) that build.ts resolves.
  *
  * What changes, and why:
  * - wikilinks read as their alias or note name ("Plan › Budget");
@@ -52,9 +52,17 @@ export interface CleanOptions {
   nextEmbed: () => number;
 }
 
-export const embedToken = (n: number): string => `\u0000E${n}\u0000`;
-export const pictureToken = (n: number): string => `\u0000P${n}\u0000`;
-export const TOKEN = /\u0000([EP])(\d+)\u0000/g;
+/** Placeholders for what the vault fills in later: an embed (E) or a
+ *  picture (P). Written with private-use characters, which notes don't
+ *  hold. */
+export const MARK = "\uE000";
+export const MARK_END = "\uE001";
+export const embedToken = (n: number): string => `${MARK}E${n}${MARK_END}`;
+export const pictureToken = (n: number): string => `${MARK}P${n}${MARK_END}`;
+export const EMBED_TOKENS = /\uE000E(\d+)\uE001/g;
+export const PICTURE_TOKENS = /\uE000P(\d+)\uE001/g;
+/** Marks a chunk that doesn't start a line, so a tag needs a space before it. */
+const NOT_LINE_START = "\uE002";
 
 type Mode = "normal" | "comment" | "html";
 
@@ -125,7 +133,7 @@ function isParagraph(line: string | undefined): boolean {
   return true;
 }
 
-const TAG = /(^|[\s\u0001])#([\p{L}\p{N}\p{M}_/-]+)/gu;
+const TAG = /(^|[\s\uE002])#([\p{L}\p{N}\p{M}_/-]+)/gu;
 const WIKI = /(!?)\[\[([^[\]\n]+?)\]\]/g;
 const MD_LINK = /(!?)\[((?:[^[\]\n]|\[[^[\]\n]*\])*)\]\(\s*(<[^>\n]*>|(?:[^\s()]|\([^\s()]*\))+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?\s*\)/g;
 const FIELD_BRACKET = /\[([\p{L}\p{N}][\p{L}\p{N} _/-]{0,60}?)::[ \t]*([^\]\n]*)\]/gu;
@@ -226,8 +234,8 @@ export function cleanMarkdown(markdown: string, options: CleanOptions): CleanRes
       if (chunkStartsLine) text += prose(chunk);
       else {
         const before = text.slice(-1);
-        const marked = /\s/.test(before) ? chunk : `\u0001${chunk}`;
-        text += prose(marked).replace(/^\u0001/, "");
+        const marked = /\s/.test(before) ? chunk : `${NOT_LINE_START}${chunk}`;
+        text += prose(marked).replace(NOT_LINE_START, "");
       }
       chunk = "";
     };

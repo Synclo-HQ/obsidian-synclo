@@ -1,4 +1,4 @@
-import { cleanMarkdown, pictureToken, type CleanResult, type EmbedRef } from "./clean";
+import { EMBED_TOKENS, MARK, PICTURE_TOKENS, cleanMarkdown, pictureToken, type CleanResult, type EmbedRef } from "./clean";
 import { frontmatterTitle, isDrawingFrontmatter, splitFrontmatter } from "./frontmatter";
 import { LeftOut, type LeftOutKind } from "./left-out";
 import { altFromFileName, embedAlt, kindOfExtension, kindOfLinkpath, linkDisplay, pictureType, safeAlt } from "./links";
@@ -256,8 +256,8 @@ export async function buildMaterial(input: NoteInput, reader: VaultReader, optio
   mainText = mainText.trim();
   if (!/^#[ \t]/.test(mainText)) mainText = mainText ? `# ${title}\n\n${mainText}` : `# ${title}`;
   const text = tidy([mainText, ...linkedParts].join("\n\n---\n\n"));
-  const withoutPictures = text.replace(/\u0000P\d+\u0000/g, " ");
-  const mainWords = serverWordCount(mainText.replace(/\u0000P\d+\u0000/g, " "));
+  const withoutPictures = text.replace(PICTURE_TOKENS, " ");
+  const mainWords = serverWordCount(mainText.replace(PICTURE_TOKENS, " "));
   const uniqueLinks = new Set(main.links).size;
   return {
     title,
@@ -288,11 +288,11 @@ export function placeEmbeds(text: string, made: Map<number, string>): string {
     if (/^[ \t]*(?:>[ \t]?)*[ \t]*(`{3,}|~{3,})/.test(line)) fence = !fence;
     const heading = fence ? null : /^(#{1,6})[ \t]/.exec(line);
     if (heading) under = (heading[1] ?? "").length;
-    if (!line.includes("\u0000E")) {
+    if (!line.includes(`${MARK}E`)) {
       out.push(line);
       continue;
     }
-    const whole = /^((?:[ \t]{0,3}>[ \t]?)*)([ \t]*(?:[-*+][ \t]+|\d+[.)][ \t]+)?)\u0000E(\d+)\u0000[ \t]*$/.exec(line);
+    const whole = /^((?:[ \t]{0,3}>[ \t]?)*)([ \t]*(?:[-*+][ \t]+|\d+[.)][ \t]+)?)\uE000E(\d+)\uE001[ \t]*$/.exec(line);
     if (whole) {
       const quote = whole[1] ?? "";
       const lead = whole[2] ?? "";
@@ -314,7 +314,7 @@ export function placeEmbeds(text: string, made: Map<number, string>): string {
       out.push(quote + lead + (lines[0] ?? ""), ...lines.slice(1).map((l) => (l.trim() ? cont + l : quote.trimEnd())));
       continue;
     }
-    out.push(line.replace(/\u0000E(\d+)\u0000/g, (_m, n: string) => (made.get(Number(n)) ?? "").replace(/\s*\n\s*/g, " ").trim()));
+    out.push(line.replace(EMBED_TOKENS, (_m, n: string) => (made.get(Number(n)) ?? "").replace(/\s*\n\s*/g, " ").trim()));
   }
   return out.join("\n");
 }
@@ -322,7 +322,7 @@ export function placeEmbeds(text: string, made: Map<number, string>): string {
 /** The material as sent: each picture where it was, at its Synclo address
  *  (or left out when it couldn't be sent). */
 export function withPictures(material: Pick<Material, "text" | "placements">, urls: Map<number, string>): string {
-  const text = material.text.replace(/\u0000P(\d+)\u0000/g, (_m, k: string) => {
+  const text = material.text.replace(PICTURE_TOKENS, (_m, k: string) => {
     const place = material.placements[Number(k) - 1];
     const url = place ? urls.get(place.picture) : undefined;
     if (!place || !url) return "";
@@ -335,7 +335,7 @@ export function withPictures(material: Pick<Material, "text" | "placements">, ur
  *  or its file name. */
 export function previewText(material: Pick<Material, "text" | "placements" | "pictures">): string {
   const byN = new Map(material.pictures.map((p) => [p.n, p]));
-  return material.text.replace(/\u0000P(\d+)\u0000/g, (_m, k: string) => {
+  return material.text.replace(PICTURE_TOKENS, (_m, k: string) => {
     const place = material.placements[Number(k) - 1];
     const pic = place ? byN.get(place.picture) : undefined;
     return place && pic ? `[Picture: ${place.alt || pic.file.basename}]` : "";

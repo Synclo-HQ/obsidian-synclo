@@ -15,7 +15,7 @@ export function fakeHttp(handler: Handler): { http: Http; requests: HttpRequest[
       status: a.status,
       headers: { "content-type": "application/json", ...(a.headers ?? {}) },
       text: () => text,
-      arrayBuffer: () => new TextEncoder().encode(text).buffer as ArrayBuffer,
+      arrayBuffer: () => new TextEncoder().encode(text).buffer,
     };
     return res;
   };

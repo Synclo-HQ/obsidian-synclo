@@ -3,7 +3,7 @@ import { join, relative } from "node:path";
 import type { NoteInput, VaultFile, VaultReader } from "../src/material/build";
 
 const ROOT = join(__dirname, "fixtures", "vault");
-const SIZES: Record<string, number> = JSON.parse(readFileSync(join(__dirname, "fixtures", "vault-sizes.json"), "utf8"));
+const SIZES = JSON.parse(readFileSync(join(__dirname, "fixtures", "vault-sizes.json"), "utf8")) as Record<string, number>;
 
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(join(dir, d.name)) : [join(dir, d.name)]));

@@ -70,7 +70,7 @@ describe("signing in", () => {
     const { s, secrets, requests } = session(() => ({ status: 200, body: { access_token: "syo_a", refresh_token: "syr_a", expires_in: 3600, token_type: "Bearer", scope: "presentations:read presentations:write" } }));
     const url = new URL(await s.startSignIn("Vault"));
     const state = url.searchParams.get("state") ?? "";
-    const pending = JSON.parse(secrets.get(SECRET_PENDING) ?? "{}");
+    const pending = JSON.parse(secrets.get(SECRET_PENDING) ?? "{}") as { verifier: string };
     const result = await s.finishSignIn({ action: "synclo-auth", code: "c0de", state, iss: BASE }, "Vault");
     expect(result).toEqual({ kind: "connected" });
     expect(form(requests[0]!)).toEqual({
@@ -133,7 +133,7 @@ describe("staying signed in", () => {
     expect(await all).toEqual(["syo_2", "syo_2", "syo_2"]);
     expect(calls).toBe(1);
     expect(form(requests[0]!)).toEqual({ grant_type: "refresh_token", refresh_token: "syr_1", client_id: "synclo-obsidian", resource: "https://synclo.app/mcp" });
-    expect(JSON.parse(secrets.get(SECRET_TOKENS) ?? "{}").refresh).toBe("syr_2");
+    expect((JSON.parse(secrets.get(SECRET_TOKENS) ?? "{}") as { refresh: string }).refresh).toBe("syr_2");
   });
 
   it("uses the token another call already refreshed", async () => {

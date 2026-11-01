@@ -1,0 +1,191 @@
+/* Synclo for Obsidian. Obsidian's own variables throughout, so themes and
+   snippets can restyle everything here. */
+
+/* The make window */
+.synclo-make .modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-3);
+}
+
+.synclo-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  padding: var(--size-4-3);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+
+.synclo-summary-from {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.synclo-summary-title {
+  font-size: var(--font-ui-large);
+  font-weight: var(--font-semibold);
+  color: var(--text-normal);
+  word-break: break-word;
+}
+
+.synclo-summary-line {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+}
+
+.synclo-summary-detail {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.synclo-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  font-style: italic;
+}
+
+.synclo-warning {
+  color: var(--text-warning);
+  font-size: var(--font-ui-small);
+}
+
+.synclo-link-button {
+  align-self: flex-start;
+  padding: 0;
+  height: auto;
+  background: none;
+  box-shadow: none;
+  border: none;
+  color: var(--text-accent);
+  font-size: var(--font-ui-small);
+  cursor: pointer;
+}
+
+.synclo-link-button:hover {
+  text-decoration: underline;
+}
+
+.synclo-preview {
+  max-height: 16rem;
+  overflow: auto;
+  margin: 0;
+  padding: var(--size-4-2);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.synclo-choices .setting-item:first-child {
+  border-top: none;
+}
+
+.synclo-more > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  padding: var(--size-4-2) 0;
+}
+
+.synclo-more textarea {
+  width: 100%;
+  min-width: 12rem;
+  resize: vertical;
+}
+
+.synclo-estimate {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+}
+
+.synclo-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--size-2-3);
+  padding: var(--size-4-2) var(--size-4-3);
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
+  font-size: var(--font-ui-small);
+}
+
+.synclo-privacy {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.synclo-connect {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+}
+
+.synclo-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--size-4-2);
+}
+
+/* Notices */
+.synclo-notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-2);
+}
+
+.synclo-notice-title {
+  font-weight: var(--font-semibold);
+}
+
+.synclo-notice-detail {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.synclo-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-2-3);
+  margin-top: var(--size-2-2);
+}
+
+/* The status bar */
+.synclo-status {
+  cursor: pointer;
+}
+
+/* Find */
+.synclo-found {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+}
+
+.synclo-found-meta {
+  color: var(--text-muted);
+}
+
+.synclo-action-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+
+.synclo-action-list button {
+  width: 100%;
+}
+
+/* Phones: the window's rows stack, buttons fill the width. */
+.is-phone .synclo-buttons button {
+  flex: 1 1 auto;
+}

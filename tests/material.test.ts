@@ -112,7 +112,7 @@ describe("pictures in both syntaxes", () => {
     expect(text).toContain("![team](https://img.synclo.test/one.jpg)");
     expect(text).toContain("![The team, again](https://img.synclo.test/one.jpg)");
     expect(text).not.toContain("Architecture diagram");
-    expect(text).not.toMatch(/\u0000/);
+    expect(text).not.toMatch(/[\uE000-\uE002]/);
     expect(text).not.toMatch(/^- $/m);
   });
 });
