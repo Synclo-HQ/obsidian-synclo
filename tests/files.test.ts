@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { downloadName, fetchFile, freePath, safeFileName, withFileLink } from "../src/files";
 import { DEFAULT_SETTINGS, lengthOptions, parseSettings } from "../src/settings";
+import { markdownLink } from "../src/util/link-text";
 import { fakeHttp, type FakeAnswer } from "./fake-http";
 
 describe("downloading a file", () => {
@@ -58,6 +59,14 @@ describe("the note's list of files", () => {
     expect(withFileLink("[[Old.pdf]]", "[[Q3.pptx]]")).toEqual(["[[Old.pdf]]", "[[Q3.pptx]]"]);
     expect(withFileLink(["[[Q3.pptx]]", 7], "[[Q3.pptx]]")).toEqual(["[[Q3.pptx]]", 7]);
     expect(withFileLink(null, "[[Q3.pdf]]")).toEqual(["[[Q3.pdf]]"]);
+  });
+});
+
+describe("inserting a link", () => {
+  it("keeps the selected words as the link's text", () => {
+    expect(markdownLink("the Q3 deck", "Q3 in review", "https://synclo.app/d/1")).toBe("[the Q3 deck](https://synclo.app/d/1)");
+    expect(markdownLink("", "Q3 in review", "https://synclo.app/d/1")).toBe("[Q3 in review](https://synclo.app/d/1)");
+    expect(markdownLink("  ", "Q3 [draft]", "https://synclo.app/d/1")).toBe("[Q3 \\[draft\\]](https://synclo.app/d/1)");
   });
 });
 

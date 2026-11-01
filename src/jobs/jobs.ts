@@ -16,7 +16,27 @@ export interface PendingJob {
   format: Format;
   /** The server it was made on. */
   base: string;
+  /** The workspace it was made in (jobs saved before this was kept have
+   *  none, and are followed in whatever workspace is connected). */
+  workspace?: WorkspaceRef;
   startedAt: number;
+}
+
+/** A workspace as Synclo names it: its id when Synclo gives one, and its
+ *  name. */
+export interface WorkspaceRef {
+  id?: string;
+  name: string;
+}
+
+/** Whether a job belongs to the connected workspace. A job that names no
+ *  workspace belongs to any; with no workspace known yet, none that names
+ *  one does. Ids are compared when both sides have one, else names. */
+export function sameWorkspace(job: PendingJob, current: WorkspaceRef | null): boolean {
+  if (!job.workspace) return true;
+  if (!current) return false;
+  if (job.workspace.id && current.id) return job.workspace.id === current.id;
+  return job.workspace.name === current.name;
 }
 
 export interface JobStore {
@@ -30,7 +50,11 @@ export function parseJobs(raw: unknown): PendingJob[] {
     if (typeof j !== "object" || j === null) return [];
     const o = j as Record<string, unknown>;
     if (typeof o.generationId !== "string" || typeof o.notePath !== "string" || typeof o.base !== "string" || typeof o.startedAt !== "number") return [];
-    return [{ generationId: o.generationId, notePath: o.notePath, title: typeof o.title === "string" ? o.title : "", format: o.format === "document" ? "document" : "slides", base: o.base, startedAt: o.startedAt }];
+    const ws = typeof o.workspace === "object" && o.workspace !== null ? (o.workspace as Record<string, unknown>) : null;
+    const workspace: WorkspaceRef | undefined = ws && typeof ws.name === "string" ? { name: ws.name, ...(typeof ws.id === "string" && ws.id ? { id: ws.id } : {}) } : undefined;
+    const job: PendingJob = { generationId: o.generationId, notePath: o.notePath, title: typeof o.title === "string" ? o.title : "", format: o.format === "document" ? "document" : "slides", base: o.base, startedAt: o.startedAt };
+    if (workspace) job.workspace = workspace;
+    return [job];
   });
 }
 

@@ -6,16 +6,21 @@ import { DEFAULT_BASE, normalizeBase } from "./auth/oauth";
 import { Session } from "./auth/session";
 import { downloadName, fetchFile, freePath, withFileLink } from "./files";
 import type { SyncloHost } from "./host";
-import { parseJobs, unit, type PendingJob } from "./jobs/jobs";
+import { parseJobs, unit, type PendingJob, type WorkspaceRef } from "./jobs/jobs";
 import { JobRunner } from "./jobs/runner";
 import { obsidianHttp } from "./obsidian/http";
 import { secretStore } from "./obsidian/secrets";
 import { DEFAULT_SETTINGS, parseSettings, type SyncloSettings } from "./settings";
 import { FindModal } from "./ui/find-modal";
-import { MakeModal } from "./ui/make-modal";
+import { MakeModal, makeWindowOpen } from "./ui/make-modal";
 import { richContent, richNotice, type NoticeAction } from "./ui/notices";
 import { ProgressView } from "./ui/progress";
 import { SyncloSettingTab } from "./ui/settings-tab";
+
+/** A workspace as jobs remember it. */
+function workspaceOf(account: Account): WorkspaceRef {
+  return account.workspaceId ? { id: account.workspaceId, name: account.workspace } : { name: account.workspace };
+}
 
 /** The frontmatter key the presentation's link is written to. */
 const LINK_KEY = "synclo";
@@ -45,7 +50,14 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     this.settings = parseSettings(await this.loadData());
     const now = () => Date.now();
     const base = () => this.base();
-    this.session = new Session({ http: this.http, secrets: secretStore(this.app), crypto: window.crypto, now, base });
+    this.session = new Session({
+      http: this.http,
+      secrets: secretStore(this.app),
+      local: { load: (key) => this.app.loadLocalStorage(key) as unknown, save: (key, value) => this.app.saveLocalStorage(key, value) },
+      crypto: window.crypto,
+      now,
+      base,
+    });
     this.mcp = new McpClient({ http: this.http, session: this.session, base, now });
     this.api = new SyncloApi(this.mcp);
     this.progress = new ProgressView(this, Platform.isDesktopApp ? this.addStatusBarItem() : null);
@@ -72,6 +84,10 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
         this.accountCache = null;
         this.themesCache = null;
         this.uploaded.clear();
+        // A new sign-in may be to another workspace: presentations made in
+        // a workspace wait until the account says which (account() then
+        // resumes them).
+        this.runner.setWorkspace(null);
         if (signedIn) {
           this.progress.signedIn();
           this.runner.resumeAll();
@@ -90,10 +106,20 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => this.runner.renamed(oldPath, file.path)));
     // Back to the front, or back online: check on presentations at once.
     this.registerDomEvent(document, "visibilitychange", () => {
-      if (document.visibilityState === "visible") this.runner.kick();
+      if (document.visibilityState === "visible") this.backToWork();
     });
-    this.registerDomEvent(window, "online", () => this.runner.kick());
-    this.app.workspace.onLayoutReady(() => this.runner.resumeAll());
+    this.registerDomEvent(window, "online", () => this.backToWork());
+    this.app.workspace.onLayoutReady(() => {
+      this.runner.resumeAll();
+      void this.account();
+    });
+  }
+
+  /** Obsidian is in front again or back online: check on presentations,
+   *  and learn the workspace if it isn't known yet. */
+  private backToWork(): void {
+    this.runner.kick();
+    if (this.session.isSignedIn() && !this.accountCache) void this.account();
   }
 
   onunload(): void {
@@ -137,6 +163,10 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     try {
       const value = await this.api.account();
       this.accountCache = { value, at: Date.now() };
+      // Presentations made in this workspace are followed; others wait,
+      // untouched, until theirs is connected.
+      this.runner.setWorkspace(workspaceOf(value));
+      this.runner.resumeAll();
       return value;
     } catch {
       return this.accountCache?.value ?? null;
@@ -180,8 +210,15 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
   }
 
   startJob(job: PendingJob): void {
+    const account = this.cachedAccount();
+    if (account && !job.workspace) job.workspace = workspaceOf(account);
     this.progress.started(job);
     this.runner.add(job);
+  }
+
+  noteDocumentId(file: TFile): string | null {
+    const link = this.linkOf(file);
+    return link ? documentIdOf(link) : null;
   }
 
   async onReady(job: PendingJob, gen: Generation): Promise<void> {
@@ -244,8 +281,9 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
       const saved = await this.app.vault.createBinary(path, bytes);
       const linked = near ? await this.linkFile(near, saved) : false;
       working.hide();
-      const attachments = this.settings.saveTo === "attachments";
-      const place = near ? (attachments ? "In your attachments folder" : "Next to this note") : saved.parent && !saved.parent.isRoot() ? `In ${saved.parent.path}` : "In the vault's top folder";
+      // With no note it belongs to, a file goes to the attachment folder.
+      const attachments = !near || this.settings.saveTo === "attachments";
+      const place = attachments ? "In your attachments folder" : "Next to this note";
       const where = linked ? (attachments ? `${place}; the link is in the note's properties.` : `${place}; the link is in its properties.`) : `${place}.`;
       richNotice({
         title: `Saved “${saved.name}”`,
@@ -394,7 +432,9 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
 
   private makeFromSelection(editor: Editor, file: TFile): void {
     const from = editor.getCursor("from");
-    new MakeModal(this, { file, selection: editor.getSelection(), selectionAtStart: from.line === 0 && from.ch === 0 }).open();
+    // The note before the selection says whether it starts inside a code
+    // block or a comment.
+    new MakeModal(this, { file, selection: editor.getSelection(), selectionAtStart: from.line === 0 && from.ch === 0, before: editor.getRange({ line: 0, ch: 0 }, from) }).open();
   }
 
   private find(): void {
@@ -438,7 +478,8 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     switch (result.kind) {
       case "connected": {
         // Shown at once, then filled in when the workspace arrives.
-        const note = this.activeNote();
+        // With a make window open, it carries on there instead.
+        const note = makeWindowOpen() ? null : this.activeNote();
         const actions: NoticeAction[] = note ? [{ label: `Make a presentation from “${this.noteTitle(note)}”`, primary: true, run: () => this.make(note) }] : [];
         const notice = richNotice({ title: "Connected to Synclo", line: "Getting your workspace…", actions });
         this.settingsTab.redraw();
@@ -470,10 +511,13 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     }
   }
 
-  /** Where a downloaded file is saved, per the setting. */
+  /** Where a downloaded file is saved, per the setting; a file no note is
+   *  given goes to the attachment folder, from no note (not whichever note
+   *  is open). */
   private async savePath(name: string, near: TFile | null): Promise<string> {
-    if (this.settings.saveTo === "attachments") return this.app.fileManager.getAvailablePathForAttachment(name, near?.path);
-    const parent = near?.parent;
+    if (!near) return this.app.fileManager.getAvailablePathForAttachment(name, "");
+    if (this.settings.saveTo === "attachments") return this.app.fileManager.getAvailablePathForAttachment(name, near.path);
+    const parent = near.parent;
     const folder = parent && !parent.isRoot() ? parent.path : "";
     return normalizePath(freePath(folder, name, (p) => this.app.vault.getAbstractFileByPath(normalizePath(p)) !== null));
   }

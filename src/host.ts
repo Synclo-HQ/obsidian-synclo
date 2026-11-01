@@ -30,8 +30,12 @@ export interface SyncloHost {
   /** Uploads one of a note's pictures; the same file unchanged is sent
    *  once, so trying again sends the very same request. */
   uploadPicture(file: TFile, type: string): Promise<string>;
-  /** Makes a file of a presentation and saves it in the vault. */
+  /** Makes a file of a presentation and saves it in the vault: next to
+   *  `near` (or in the attachment folder, per the setting) with a link in
+   *  its properties; with no note, in the attachment folder only. */
   download(documentId: string, format: FileFormat, near: TFile | null, title: string): Promise<void>;
+  /** The presentation a note's properties link to, or null. */
+  noteDocumentId(file: TFile): string | null;
   openExternal(url: string): void;
   /** Where to get more credits. */
   creditsUrl(): string;

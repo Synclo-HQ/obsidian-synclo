@@ -1,4 +1,4 @@
-import { NetworkError, isRecord, jsonOf, type Http } from "../api/http";
+import { NetworkError, isRecord, jsonOf, type Http, type HttpResponse } from "../api/http";
 
 /**
  * Synclo's OAuth 2.1 endpoints for this plugin, a public client (no
@@ -87,7 +87,7 @@ export class OAuthError extends Error {
 
 const TOKEN_TIMEOUT_MS = 30_000;
 
-async function postForm(http: Http, url: string, form: Record<string, string>): Promise<unknown> {
+async function postForm(http: Http, url: string, form: Record<string, string>, late?: (response: HttpResponse) => void): Promise<unknown> {
   const res = await http({
     url,
     method: "POST",
@@ -95,6 +95,7 @@ async function postForm(http: Http, url: string, form: Record<string, string>): 
     headers: { Accept: "application/json" },
     body: new URLSearchParams(form).toString(),
     timeoutMs: TOKEN_TIMEOUT_MS,
+    ...(late ? { late } : {}),
   });
   const body = jsonOf(res);
   if (res.status >= 200 && res.status < 300) return body;
@@ -117,9 +118,23 @@ export async function exchangeCode(http: Http, base: string, code: string, verif
   return tokenSet(body, now());
 }
 
-export async function refreshTokens(http: Http, base: string, refresh: string, now: () => number): Promise<TokenSet> {
+/** Exchanges the refresh token for new tokens. Synclo rotates the refresh
+ *  token on every use, so an answer that arrives after the wait was given
+ *  up still carries the only refresh token that works: it is handed to
+ *  `onLate`. */
+export async function refreshTokens(http: Http, base: string, refresh: string, now: () => number, onLate?: (tokens: TokenSet) => void): Promise<TokenSet> {
   const e = endpoints(base);
-  const body = await postForm(http, e.token, { grant_type: "refresh_token", refresh_token: refresh, client_id: CLIENT_ID, resource: e.resource });
+  const late = onLate
+    ? (res: HttpResponse) => {
+        if (res.status < 200 || res.status >= 300) return;
+        try {
+          onLate(tokenSet(jsonOf(res), now(), refresh));
+        } catch {
+          // An answer without tokens: nothing to keep.
+        }
+      }
+    : undefined;
+  const body = await postForm(http, e.token, { grant_type: "refresh_token", refresh_token: refresh, client_id: CLIENT_ID, resource: e.resource }, late);
   return tokenSet(body, now(), refresh);
 }
 

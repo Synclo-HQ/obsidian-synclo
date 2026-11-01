@@ -1,4 +1,4 @@
-import { EMBED_TOKENS, MARK, PICTURE_TOKENS, cleanMarkdown, pictureToken, type CleanResult, type EmbedRef } from "./clean";
+import { EMBED_TOKENS, MARK, PICTURE_TOKENS, cleanMarkdown, pictureToken, stateAfter, type CleanResult, type CleanState, type EmbedRef } from "./clean";
 import { frontmatterTitle, isDrawingFrontmatter, normalizeNewlines, splitFrontmatter } from "./frontmatter";
 import { LeftOut, type LeftOutKind } from "./left-out";
 import { altFromFileName, embedAlt, kindOfExtension, kindOfLinkpath, linkDisplay, pictureType, safeAlt } from "./links";
@@ -40,6 +40,9 @@ export interface NoteInput {
   /** A selection that starts at the note's first character (it may hold
    *  the frontmatter). */
   selectionAtStart?: boolean;
+  /** The note's text before the selection: it decides whether the
+   *  selection starts inside a code block or a comment. */
+  before?: string;
 }
 
 export interface BuildOptions {
@@ -111,8 +114,8 @@ export async function buildMaterial(input: NoteInput, reader: VaultReader, optio
   let embedSeq = 0;
   const nextEmbed = () => ++embedSeq;
 
-  const clean = (markdown: string, sourcePath: string): CleanResult => {
-    const res = cleanMarkdown(markdown, { sourcePath, leftOut, nextEmbed });
+  const clean = (markdown: string, sourcePath: string, start?: CleanState): CleanResult => {
+    const res = cleanMarkdown(markdown, { sourcePath, leftOut, nextEmbed, ...(start ? { start } : {}) });
     remotePictures += res.remotePictures;
     return res;
   };
@@ -210,7 +213,10 @@ export async function buildMaterial(input: NoteInput, reader: VaultReader, optio
   }
   if (input.selection && !reader.title) fmTitle = bodyOf(await reader.read(input.file), input.file).title;
   const title = (reader.title?.(input.file) ?? fmTitle ?? "").trim() || input.file.basename.replace(/\.excalidraw$/i, "");
-  const main = clean(markdown, input.file.path);
+  // A selection that starts inside a code block or a comment is read from
+  // there (the note before it, frontmatter aside, says which).
+  const start = input.selection && !input.selectionAtStart && input.before ? stateAfter(splitFrontmatter(normalizeNewlines(input.before)).body) : undefined;
+  const main = clean(markdown, input.file.path, start);
   let mainText = await expand(main, 0, input.file);
 
   // The notes it links to, one level deep.

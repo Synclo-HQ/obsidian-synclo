@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { McpClient } from "../src/api/mcp";
 import { SyncloApi, documentIdOf, parseGeneration } from "../src/api/synclo";
 import { SECRET_TOKENS, Session } from "../src/auth/session";
-import { fakeHttp, memorySecrets, rpcResult, type Handler } from "./fake-http";
+import { fakeHttp, memoryLocal, memorySecrets, rpcResult, type Handler } from "./fake-http";
 
 const BASE = "https://synclo.app";
 
@@ -11,7 +11,7 @@ function client(handler: Handler) {
   const { http, requests } = fakeHttp(handler);
   const secrets = memorySecrets();
   secrets.set(SECRET_TOKENS, JSON.stringify({ v: 1, base: BASE, access: "syo_1", refresh: "syr_1", expiresAt: 9_999_999_999_999, scope: "" }));
-  const session = new Session({ http, secrets, crypto: webcrypto as unknown as Crypto, now: () => 0, base: () => BASE });
+  const session = new Session({ http, secrets, local: memoryLocal(), crypto: webcrypto as unknown as Crypto, now: () => 0, base: () => BASE });
   const mcp = new McpClient({ http, session, base: () => BASE, now: () => 0 });
   return { mcp, api: new SyncloApi(mcp), requests, secrets };
 }
@@ -23,7 +23,7 @@ const argsOf = (r: { body?: string | ArrayBuffer }) => (JSON.parse(r.body as str
 describe("calling a tool", () => {
   it("sends one JSON-RPC message with the bearer token", async () => {
     const { api, requests } = client(() => rpcResult({ workspace: { name: "Studio Nine" }, credits: { balance: 400 }, plan: { id: "free", slides_per_prompt: 10 } }));
-    expect(await api.account()).toEqual({ workspace: "Studio Nine", balance: 400, planId: "free", slidesPerPrompt: 10 });
+    expect(await api.account()).toEqual({ workspace: "Studio Nine", workspaceId: null, balance: 400, planId: "free", slidesPerPrompt: 10 });
     const req = requests[0]!;
     expect(req.url).toBe("https://synclo.app/mcp");
     expect(req.headers?.Authorization).toBe("Bearer syo_1");

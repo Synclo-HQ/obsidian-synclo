@@ -3,12 +3,23 @@ import { SyncloError, isOutOfCredits, messageFor } from "../api/errors";
 import { utf8Length } from "../api/http";
 import type { Format, Mode } from "../api/synclo";
 import type { SyncloHost } from "../host";
+import { richNotice } from "./notices";
 import { unit } from "../jobs/jobs";
 import { LIMITS, buildMaterial, previewText, withPictures, type Material } from "../material/build";
 import { describeLeftOut } from "../material/left-out";
 import { SOURCE_MIN_WORDS } from "../material/words";
 import { vaultReader } from "../obsidian/vault";
 import { IMAGE_STYLES, lengthOptions } from "../settings";
+
+/** Make windows open now (the Connected notice offers Make only when none
+ *  is). */
+let openWindows = 0;
+export function makeWindowOpen(): boolean {
+  return openWindows > 0;
+}
+
+/** A control's name on its element, so a redraw can give it focus back. */
+const CONTROL = "data-synclo-control";
 
 export const PRIVACY_LINE = "Only this note (and anything you chose to include) is sent to Synclo when you click Make. Nothing else in your vault is read.";
 const CREDITS_PER_SLIDE = 10;
@@ -19,6 +30,8 @@ export interface MakeSource {
   selection?: string;
   /** The selection starts at the note's first character. */
   selectionAtStart?: boolean;
+  /** The note's text before the selection. */
+  before?: string;
 }
 
 interface Choices {
@@ -43,13 +56,22 @@ export class MakeModal extends Modal {
   private material: Material | null = null;
   private building: Promise<void> | null = null;
   private busy = false;
-  private error: { message: string; outOfCredits: boolean; signedOut: boolean } | null = null;
+  /** `reconnect`: the sign-in ended, or this connection may no longer do
+   *  this; connecting again is the way on. */
+  private error: { message: string; outOfCredits: boolean; reconnect: boolean } | null = null;
   private previewOpen = false;
   private moreOpen = false;
   /** What the choices were last drawn from (to redraw only on a change). */
   private drawnFrom = "";
   private unsubscribe: (() => void) | null = null;
+  private unsubscribeEnded: (() => void) | null = null;
   private waitingForSignIn = false;
+  /** The window was closed: nothing more is drawn into it. */
+  private closed = false;
+  /** The account arrived while a control had focus: the choices are
+   *  drawn again once it leaves. */
+  private redrawWhenFree = false;
+  private makeButton: HTMLButtonElement | null = null;
 
   private summaryEl!: HTMLElement;
   private bodyEl!: HTMLElement;
@@ -72,11 +94,23 @@ export class MakeModal extends Modal {
     this.summaryEl = this.contentEl.createDiv({ cls: "synclo-summary" });
     this.bodyEl = this.contentEl.createDiv({ cls: "synclo-body" });
     this.footerEl = this.contentEl.createDiv({ cls: "synclo-footer" });
+    openWindows++;
     this.unsubscribe = this.host.session.onChange((signedIn) => {
       this.waitingForSignIn = false;
       this.error = null;
       this.renderBody();
       if (signedIn) void this.refreshAccount();
+    });
+    // A sign-in declined or failed: back to Connect.
+    this.unsubscribeEnded = this.host.session.onSignInEnded(() => {
+      if (!this.waitingForSignIn) return;
+      this.waitingForSignIn = false;
+      this.renderBody();
+    });
+    this.scope.register(["Mod"], "Enter", (evt) => {
+      evt.preventDefault();
+      void this.make();
+      return false;
     });
     this.renderSummary();
     this.renderBody();
@@ -85,13 +119,59 @@ export class MakeModal extends Modal {
   }
 
   onClose(): void {
+    this.closed = true;
+    openWindows = Math.max(0, openWindows - 1);
     this.unsubscribe?.();
+    this.unsubscribeEnded?.();
     this.contentEl.empty();
   }
 
   private async refreshAccount(): Promise<void> {
     await Promise.all([this.host.account(), this.host.themes()]);
-    if (!this.busy && this.drawnFrom !== this.accountKey()) this.renderBody();
+    if (this.closed || this.busy || this.drawnFrom === this.accountKey()) return;
+    // The cost and balance at once; the choices when no control is in use
+    // (an open dropdown would close, a field lose its caret).
+    this.renderFooter();
+    if (this.controlInUse()) this.waitUntilFree();
+    else this.renderBody();
+  }
+
+  /** A choice has focus (its dropdown may be open, its field typed in). */
+  private controlInUse(): boolean {
+    const active = this.contentEl.ownerDocument.activeElement;
+    return !!active && this.bodyEl.contains(active) && /^(SELECT|INPUT|TEXTAREA)$/.test(active.tagName);
+  }
+
+  private waitUntilFree(): void {
+    if (this.redrawWhenFree) return;
+    this.redrawWhenFree = true;
+    const check = () => {
+      // Focus moves after focusout: look once it has landed.
+      window.setTimeout(() => {
+        if (this.closed || !this.redrawWhenFree) return;
+        if (this.controlInUse()) {
+          this.bodyEl.addEventListener("focusout", check, { once: true });
+          return;
+        }
+        this.redrawWhenFree = false;
+        if (!this.busy) this.renderBody();
+      }, 0);
+    };
+    this.bodyEl.addEventListener("focusout", check, { once: true });
+  }
+
+  /** The control that has focus, by name, or null. */
+  private focusedControl(): string | null {
+    const active = this.contentEl.ownerDocument.activeElement;
+    if (!active || !this.contentEl.contains(active)) return null;
+    return active.closest(`[${CONTROL}]`)?.getAttribute(CONTROL) ?? null;
+  }
+
+  /** Draws again, giving focus back to the control that had it. */
+  private keepFocus(draw: () => void): void {
+    const name = this.focusedControl();
+    draw();
+    if (name) this.contentEl.querySelector<HTMLElement>(`[${CONTROL}="${name}"]`)?.focus();
   }
 
   private accountKey(): string {
@@ -102,27 +182,32 @@ export class MakeModal extends Modal {
 
   private async rebuild(): Promise<void> {
     const seq = ++this.buildSeq;
+    const first = seq === 1;
     const run = (async () => {
       this.material = null;
       this.renderSummary();
+      // Make waits while the note is read again.
+      this.renderFooter();
       const text = this.source.selection ?? (await this.host.app.vault.cachedRead(this.source.file));
       const f = this.source.file;
       const built = await buildMaterial(
-        { file: { path: f.path, basename: f.basename, extension: f.extension, size: f.stat.size }, markdown: text, selection: this.source.selection !== undefined, selectionAtStart: this.source.selectionAtStart },
+        { file: { path: f.path, basename: f.basename, extension: f.extension, size: f.stat.size }, markdown: text, selection: this.source.selection !== undefined, selectionAtStart: this.source.selectionAtStart, before: this.source.before },
         vaultReader(this.host.app),
         { includeLinked: this.choices.includeLinked },
       );
       // A later rebuild (Include linked notes turned again) wins.
-      if (seq !== this.buildSeq) return;
+      if (seq !== this.buildSeq || this.closed) return;
       this.material = built;
       this.renderSummary();
       this.renderBody();
+      // Read: Make is ready for Enter, unless a choice is already in use.
+      if (first && !this.focusedControl() && this.makeButton && !this.makeButton.disabled) this.makeButton.focus();
     })();
     this.building = run;
     try {
       await run;
     } catch {
-      if (seq !== this.buildSeq) return;
+      if (seq !== this.buildSeq || this.closed) return;
       this.summaryEl.empty();
       this.summaryEl.createDiv({ cls: "synclo-summary-title", text: this.source.file.basename });
       this.summaryEl.createDiv({ cls: "synclo-warning", text: "This note couldn't be read. Close this window and try again." });
@@ -138,6 +223,11 @@ export class MakeModal extends Modal {
   }
 
   private renderSummary(): void {
+    if (this.closed) return;
+    this.keepFocus(() => this.drawSummary());
+  }
+
+  private drawSummary(): void {
     const el = this.summaryEl;
     el.empty();
     const m = this.material;
@@ -164,7 +254,7 @@ export class MakeModal extends Modal {
     const tooLong = this.tooLong();
     if (tooLong) el.createDiv({ cls: "synclo-warning", text: tooLong });
 
-    const toggle = el.createEl("button", { cls: "synclo-disclosure" });
+    const toggle = el.createEl("button", { cls: "synclo-disclosure", attr: { [CONTROL]: "preview" } });
     toggle.toggleClass("is-open", this.previewOpen);
     toggle.setAttribute("aria-expanded", String(this.previewOpen));
     setIcon(toggle.createSpan({ cls: "synclo-disclosure-icon" }), "chevron-right");
@@ -191,22 +281,39 @@ export class MakeModal extends Modal {
     return null;
   }
 
+  /** The choices and the footer, drawn again; the control that had focus
+   *  keeps it. */
   private renderBody(): void {
-    const el = this.bodyEl;
+    if (this.closed) return;
+    this.redrawWhenFree = false;
+    this.keepFocus(() => {
+      const el = this.bodyEl;
+      el.empty();
+      this.drawnFrom = this.accountKey();
+      if (!this.host.session.isSignedIn()) {
+        this.footerEl.empty();
+        this.renderConnect(el, this.footerEl);
+        return;
+      }
+      const choices = el.createDiv({ cls: "synclo-choices" });
+      this.renderChoices(choices);
+      // Nothing changes while it is being sent.
+      if (this.busy) {
+        for (const input of choices.findAll("select, input, textarea, button")) input.setAttribute("disabled", "");
+      }
+      this.drawFooter();
+    });
+  }
+
+  /** The cost, any error, the privacy line and the buttons only. */
+  private renderFooter(): void {
+    if (this.closed || !this.host.session.isSignedIn()) return;
+    this.keepFocus(() => this.drawFooter());
+  }
+
+  private drawFooter(): void {
     const footer = this.footerEl;
-    el.empty();
     footer.empty();
-    this.drawnFrom = this.accountKey();
-    if (!this.host.session.isSignedIn()) {
-      this.renderConnect(el, footer);
-      return;
-    }
-    const choices = el.createDiv({ cls: "synclo-choices" });
-    this.renderChoices(choices);
-    // Nothing changes while it is being sent.
-    if (this.busy) {
-      for (const input of choices.findAll("select, input, textarea")) input.setAttribute("disabled", "");
-    }
     this.renderEstimate(footer.createDiv({ cls: "synclo-estimate" }));
     if (this.error) this.renderError(footer.createDiv({ cls: "synclo-error" }));
     footer.createDiv({ cls: "synclo-privacy", text: PRIVACY_LINE });
@@ -238,7 +345,7 @@ export class MakeModal extends Modal {
     const generate = this.mode() === "generate";
 
     new Setting(el).setName("Format").addDropdown((d) =>
-      d
+      named(d.selectEl, "format", d)
         .addOptions({ slides: "Slides", document: "Document" })
         .setValue(c.format)
         .onChange((v) => {
@@ -252,6 +359,7 @@ export class MakeModal extends Modal {
     const options = lengthOptions(account?.slidesPerPrompt ?? null, c.slides);
     if (!options.includes(c.slides)) c.slides = options[options.length - 1] ?? 8;
     const length = new Setting(el).setName("Length").addDropdown((d) => {
+      named(d.selectEl, "length", d);
       for (const n of options) d.addOption(String(n), `${generate ? "" : "Up to "}${n} ${unit(c.format, n)}`);
       d.setValue(String(c.slides)).onChange((v) => {
         c.slides = Number(v);
@@ -265,7 +373,7 @@ export class MakeModal extends Modal {
         .setName("Words")
         .setDesc(c.keepWords ? "Every word of the note is kept as written." : "Synclo tightens the wording and keeps every fact.")
         .addDropdown((d) =>
-          d
+          named(d.selectEl, "words", d)
             .addOptions({ condense: "Let Synclo condense", preserve: "Keep my words" })
             .setValue(c.keepWords ? "preserve" : "condense")
             .onChange((v) => {
@@ -277,6 +385,7 @@ export class MakeModal extends Modal {
 
     const themes = this.host.cachedThemes();
     new Setting(el).setName("Theme").addDropdown((d) => {
+      named(d.selectEl, "theme", d);
       d.addOption("", "Designed for this note");
       for (const t of themes ?? []) d.addOption(t.id, t.name);
       if (c.theme && !(themes ?? []).some((t) => t.id === c.theme)) d.addOption(c.theme, "Your saved theme");
@@ -284,6 +393,7 @@ export class MakeModal extends Modal {
     });
 
     new Setting(el).setName("Pictures").addDropdown((d) => {
+      named(d.selectEl, "pictures", d);
       for (const [id, label] of IMAGE_STYLES) d.addOption(id, label);
       d.setValue(IMAGE_STYLES.some(([id]) => id === c.imageStyle) ? c.imageStyle : "theme").onChange((v) => (c.imageStyle = v));
     });
@@ -292,35 +402,51 @@ export class MakeModal extends Modal {
       .setName("Include linked notes")
       .setDesc("Also send the notes this note links to, one level deep.")
       .addToggle((t) =>
-        t.setValue(c.includeLinked).onChange((v) => {
-          c.includeLinked = v;
-          void this.rebuild();
-        }),
+        named(t.toggleEl, "linked", t)
+          .setValue(c.includeLinked)
+          .onChange((v) => {
+            c.includeLinked = v;
+            void this.rebuild();
+          }),
       );
 
-    const more = el.createEl("details", { cls: "synclo-more" });
-    more.open = this.moreOpen;
-    more.addEventListener("toggle", () => (this.moreOpen = more.open));
-    more.createEl("summary", { text: "More choices" });
+    // "More choices": the same disclosure as "Preview the text".
+    const toggle = el.createEl("button", { cls: "synclo-disclosure", attr: { [CONTROL]: "more" } });
+    setIcon(toggle.createSpan({ cls: "synclo-disclosure-icon" }), "chevron-right");
+    toggle.createSpan({ text: "More choices" });
+    const more = el.createDiv({ cls: "synclo-more" });
+    const show = () => {
+      toggle.toggleClass("is-open", this.moreOpen);
+      toggle.setAttribute("aria-expanded", String(this.moreOpen));
+      more.toggle(this.moreOpen);
+    };
+    show();
+    toggle.addEventListener("click", () => {
+      this.moreOpen = !this.moreOpen;
+      show();
+    });
     new Setting(more)
       .setName("Language")
       .setDesc("Leave empty to use the note's language.")
       .addText((t) =>
-        t
+        named(t.inputEl, "language", t)
           .setPlaceholder("Same as the note")
           .setValue(c.language)
           .onChange((v) => (c.language = v)),
       );
-    new Setting(more)
+    const instructions = new Setting(more)
       .setName("Instructions")
       .setDesc("Anything Synclo should know, such as who it's for.")
       .addTextArea((t) => {
+        named(t.inputEl, "instructions", t);
         t.setPlaceholder("For the board, focus on the results")
           .setValue(c.instructions)
           .onChange((v) => (c.instructions = v));
         t.inputEl.maxLength = 2000;
         t.inputEl.rows = 3;
       });
+    // On a phone the field sits under its label, full width.
+    instructions.settingEl.addClass("synclo-stacked");
   }
 
   private credits(): number {
@@ -353,7 +479,7 @@ export class MakeModal extends Modal {
     if (e.outOfCredits) {
       el.createEl("button", { text: "Get more credits" }).addEventListener("click", () => this.host.openExternal(this.host.creditsUrl()));
     }
-    if (e.signedOut) {
+    if (e.reconnect) {
       this.host.prepareConnect();
       el.createEl("button", { text: "Connect again" }).addEventListener("click", () => {
         this.waitingForSignIn = true;
@@ -362,12 +488,18 @@ export class MakeModal extends Modal {
     }
   }
 
-  private renderButtons(el: HTMLElement): void {
+  /** Make can't be pressed: the note is being read, it is too long, or it
+   *  costs more than the balance. */
+  private blocked(): boolean {
     const balance = this.host.cachedAccount()?.balance ?? null;
-    const blocked = !this.material || !!this.tooLong() || (balance !== null && balance < this.credits());
-    const make = el.createEl("button", { cls: "mod-cta", text: this.busyText ?? "Make" });
-    make.disabled = this.busy || blocked;
+    return !this.material || !!this.tooLong() || (balance !== null && balance < this.credits());
+  }
+
+  private renderButtons(el: HTMLElement): void {
+    const make = el.createEl("button", { cls: "mod-cta", text: this.busyText ?? "Make", attr: { [CONTROL]: "make" } });
+    make.disabled = this.busy || this.blocked();
     make.addEventListener("click", () => void this.make());
+    this.makeButton = make;
     const cancel = el.createEl("button", { text: "Cancel" });
     cancel.disabled = this.busy;
     cancel.addEventListener("click", () => this.close());
@@ -381,14 +513,27 @@ export class MakeModal extends Modal {
     this.renderBody();
   }
 
+
   private async make(): Promise<void> {
-    if (this.busy) return;
-    if (this.building) await this.building;
+    // Taken at once, before anything is awaited: a second click (or
+    // Mod+Enter) finds it busy and starts nothing.
+    if (this.busy || this.closed || !this.host.session.isSignedIn()) return;
+    this.busy = true;
+    this.busyText = null;
+    this.renderBody();
+    if (this.building) await this.building.catch(() => undefined);
     const m = this.material;
-    if (!m || this.tooLong()) return;
+    if (this.closed || !m || this.blocked()) {
+      this.busy = false;
+      this.renderBody();
+      return;
+    }
     this.error = null;
     const c = this.choices;
     const mode = this.mode();
+    /** create_presentation was asked: from here on, it carries on even if
+     *  the window is closed. */
+    let asked = false;
     try {
       // The note's own pictures go first, only now that Make was clicked.
       const urls = new Map<number, string>();
@@ -410,11 +555,15 @@ export class MakeModal extends Modal {
               break;
             } else throw err;
           }
+          // Closed while the pictures were sent: nothing is made.
+          if (this.closed) return;
         }
       }
+      if (this.closed) return;
       const input = mode === "generate" ? withPictures(m, new Map()) : withPictures(m, urls);
       if (input.length > LIMITS.maxInputChars) throw new SyncloError("too-large", "With its pictures this is too long to send in one go. Make a presentation from a selection instead.");
       this.setBusy("Starting…");
+      asked = true;
       const started = await this.host.api.create({
         input,
         mode,
@@ -434,13 +583,33 @@ export class MakeModal extends Modal {
     } catch (err) {
       this.busy = false;
       this.busyText = null;
+      if (isOutOfCredits(err)) void this.host.account(true);
+      if (this.closed) {
+        // The window is gone; what was asked still answers, in a notice.
+        if (asked) {
+          richNotice({
+            title: `Synclo couldn't make “${m.title || "Untitled"}”`,
+            line: messageFor(err),
+            actions: isOutOfCredits(err) ? [{ label: "Get more credits", primary: true, run: () => this.host.openExternal(this.host.creditsUrl()) }] : [],
+          });
+        }
+        return;
+      }
       this.error = {
         message: messageFor(err),
         outOfCredits: isOutOfCredits(err),
-        signedOut: err instanceof SyncloError && err.kind === "signed-out",
+        reconnect: err instanceof SyncloError && (err.kind === "signed-out" || err.code === "forbidden" || err.code === "insufficient_scope"),
       };
-      if (isOutOfCredits(err)) void this.host.account(true);
       this.renderBody();
+    } finally {
+      if (this.closed) this.busy = false;
     }
   }
+}
+
+/** Names a control (for focus to come back to it after a redraw) and
+ *  returns its component, for chaining. */
+function named<T>(el: HTMLElement, name: string, component: T): T {
+  el.setAttribute(CONTROL, name);
+  return component;
 }

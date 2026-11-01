@@ -36,6 +36,8 @@ export interface EmbedRef {
 
 export interface CleanResult {
   text: string;
+  /** Where the text left off (for a text that continues it). */
+  end: CleanState;
   embeds: EmbedRef[];
   /** Notes the text links to (wikilinks and markdown links), in order. */
   links: string[];
@@ -50,6 +52,18 @@ export interface CleanOptions {
   leftOut: LeftOut;
   /** Numbers embeds across every note cleaned for one material. */
   nextEmbed: () => number;
+  /** Where the text starts: inside a code block or a comment, for a
+   *  selection that begins there (see stateAfter). */
+  start?: CleanState;
+}
+
+/** Where a text leaves the reader: in a comment, a code block, math, or an
+ *  Admonition block. */
+export interface CleanState {
+  mode: Mode;
+  fence: Fence | null;
+  math: boolean;
+  admonition: Fence | null;
 }
 
 /** Placeholders for what the vault fills in later: an embed (E) or a
@@ -69,6 +83,8 @@ type Mode = "normal" | "comment" | "html";
 interface Fence {
   char: "`" | "~";
   length: number;
+  /** The opening line's info string ("js", "mermaid"). */
+  info?: string;
   /** Left out (a query); its lines are not kept. */
   drop: boolean;
   /** An Admonition block (```ad-note), kept as a quote. */
@@ -304,13 +320,17 @@ export function cleanMarkdown(markdown: string, options: CleanOptions): CleanRes
   };
 
   const lines = markdown.split("\n");
-  let mode: Mode = "normal";
-  let fence: Fence | null = null;
-  let math = false;
+  let mode: Mode = options.start?.mode ?? "normal";
+  let fence: Fence | null = options.start?.fence ? { ...options.start.fence } : null;
+  let math = options.start?.math ?? false;
   /** An open Admonition block: its lines are kept as a quote. */
-  let admonition: Fence | null = null;
+  let admonition: Fence | null = options.start?.admonition ? { ...options.start.admonition } : null;
   /** Its option lines (title:, collapse:) come first and are read, not kept. */
   let admonitionOptions = false;
+  // A text that starts inside a kept code block or math opens it again,
+  // so what follows reads as it does in the note.
+  if (fence && !fence.drop) push(`${admonition ? "> " : ""}${fence.char.repeat(fence.length)}${fence.info ?? ""}`);
+  else if (math) push("$$");
 
   for (const raw of lines) {
     // Inside a code fence: kept as written, or left out whole.
@@ -343,7 +363,7 @@ export function cleanMarkdown(markdown: string, options: CleanOptions): CleanRes
         const dropped = DROPPED[lang];
         if (dropped) {
           leftOut.add(dropped);
-          fence = { char: opened.char, length: opened.length, drop: true, admonition: false, depth };
+          fence = { char: opened.char, length: opened.length, info: opened.info, drop: true, admonition: false, depth };
           pushRemoved(prefix);
           continue;
         }
@@ -355,7 +375,7 @@ export function cleanMarkdown(markdown: string, options: CleanOptions): CleanRes
           admonitionOptions = true;
           continue;
         }
-        fence = { char: opened.char, length: opened.length, drop: false, admonition: false, depth };
+        fence = { char: opened.char, length: opened.length, info: opened.info, drop: false, admonition: false, depth };
         push(admonition ? `> ${raw}` : raw);
         continue;
       }
@@ -420,9 +440,21 @@ export function cleanMarkdown(markdown: string, options: CleanOptions): CleanRes
     push(admonition ? `> ${text}` : text);
   }
   if (sawComment) leftOut.add("comments");
+  const end: CleanState = { mode, fence: fence ? { ...fence } : null, math, admonition: admonition ? { ...admonition } : null };
 
   while (out.length && (out[out.length - 1] ?? "").trim() === "") out.pop();
-  return { text: out.join("\n"), embeds, links, remotePictures, linkWords };
+  // A text that ends inside a kept code block or math closes it.
+  if (fence && !fence.drop) out.push(`${admonition ? "> " : ""}${fence.char.repeat(fence.length)}`);
+  else if (math) out.push("$$");
+  return { text: out.join("\n"), end, embeds, links, remotePictures, linkWords };
+}
+
+/** Where a note's text leaves the reader at its end: for a selection, the
+ *  note before it decides whether it starts inside a code block or a
+ *  comment. */
+export function stateAfter(markdown: string): CleanState {
+  let n = 0;
+  return cleanMarkdown(markdown, { sourcePath: "", leftOut: new LeftOut(), nextEmbed: () => ++n }).end;
 }
 
 function admonitionTitle(type: string): string {

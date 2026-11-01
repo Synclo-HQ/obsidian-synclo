@@ -40,6 +40,14 @@ export class SyncloSettingTab extends PluginSettingTab {
         this.redraw();
       }),
     );
+    // A sign-in declined or failed: back to Connect.
+    plugin.register(
+      host.session.onSignInEnded(() => {
+        if (!this.signingIn) return;
+        this.signingIn = false;
+        this.redraw();
+      }),
+    );
   }
 
   getSettingDefinitions(): SettingDefinitionItem[] {
@@ -60,11 +68,20 @@ export class SyncloSettingTab extends PluginSettingTab {
 
   private drawByHand(): void {
     const { containerEl } = this;
+    // The row whose control has focus gets it back after the redraw.
+    const active = containerEl.ownerDocument.activeElement;
+    const focusedRow = active && containerEl.contains(active) ? active.closest(".setting-item")?.querySelector(".setting-item-name")?.textContent : null;
     containerEl.empty();
+    let refocus: HTMLElement | null = null;
     for (const section of this.sections()) {
       if (section.heading) new Setting(containerEl).setName(section.heading).setHeading();
-      for (const row of section.rows) row.render(new Setting(containerEl).setName(row.name).setDesc(row.desc));
+      for (const row of section.rows) {
+        const setting = new Setting(containerEl).setName(row.name).setDesc(row.desc);
+        row.render(setting);
+        if (focusedRow && setting.nameEl.textContent === focusedRow) refocus = setting.controlEl.querySelector<HTMLElement>("select, input, textarea, button, .checkbox-container");
+      }
     }
+    refocus?.focus();
   }
 
   /** Draws the tab again, whichever way Obsidian draws it. Cheap, and

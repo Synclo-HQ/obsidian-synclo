@@ -1,5 +1,5 @@
 import type { Http, HttpRequest, HttpResponse } from "../src/api/http";
-import type { SecretStore } from "../src/auth/session";
+import type { LocalStore, SecretStore } from "../src/auth/session";
 
 export interface FakeAnswer {
   status: number;
@@ -47,4 +47,16 @@ export function form(req: HttpRequest): Record<string, string> {
 
 export function rpcResult(structuredContent: Record<string, unknown>, isError = false, text = "ok") {
   return { status: 200, body: { jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text }], structuredContent, ...(isError ? { isError: true } : {}) } } };
+}
+
+export function memoryLocal(): LocalStore & { all: Map<string, unknown> } {
+  const all = new Map<string, unknown>();
+  return {
+    all,
+    load: (key) => (all.has(key) ? all.get(key) : null),
+    save: (key, value) => {
+      if (value === null || value === undefined) all.delete(key);
+      else all.set(key, JSON.parse(JSON.stringify(value)) as unknown);
+    },
+  };
 }

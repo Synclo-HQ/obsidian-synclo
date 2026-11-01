@@ -51,9 +51,9 @@
   font-size: var(--font-ui-small);
 }
 
-/* "Preview the text": a disclosure, not a button. The selector outranks
-   Obsidian's own button:not(.clickable-icon) rule. */
-.synclo-make .synclo-summary button.synclo-disclosure {
+/* "Preview the text" and "More choices": disclosures, not buttons. The
+   selector outranks Obsidian's own button:not(.clickable-icon) rules. */
+.modal.synclo-make button.synclo-disclosure {
   display: inline-flex;
   align-items: center;
   gap: var(--size-2-1);
@@ -70,12 +70,12 @@
   cursor: var(--cursor-link, pointer);
 }
 
-.synclo-make .synclo-summary button.synclo-disclosure:hover {
+.modal.synclo-make button.synclo-disclosure:hover {
   background-color: transparent;
   color: var(--text-accent-hover);
 }
 
-.synclo-make .synclo-summary button.synclo-disclosure:focus-visible {
+.modal.synclo-make button.synclo-disclosure:focus-visible {
   border-radius: var(--radius-s);
   box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
 }
@@ -113,17 +113,24 @@
   border-top: none;
 }
 
-.synclo-more > summary {
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: var(--font-ui-small);
-  padding: var(--size-4-2) 0;
+.synclo-make .synclo-choices > .synclo-disclosure {
+  margin-top: var(--size-4-2);
 }
 
 .synclo-more textarea {
   width: 100%;
-  min-width: 12rem;
   resize: vertical;
+}
+
+/* On a phone, Instructions sits under its label at full width. */
+.is-phone .synclo-make .synclo-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--size-2-3);
+}
+
+.is-phone .synclo-make .synclo-stacked .setting-item-control {
+  width: 100%;
 }
 
 /* The footer stays at the bottom of the window while what's above it
@@ -156,10 +163,9 @@
   flex-direction: column;
   align-items: flex-start;
   gap: var(--size-2-3);
-  padding: var(--size-4-2) var(--size-4-3);
-  border-radius: var(--radius-s);
-  background: var(--background-modifier-error);
-  color: var(--text-on-accent);
+  padding: var(--size-2-2) 0 var(--size-2-2) var(--size-4-3);
+  border-left: 2px solid var(--text-error);
+  color: var(--text-error);
   font-size: var(--font-ui-small);
 }
 
@@ -201,11 +207,6 @@
   flex-wrap: wrap;
   gap: var(--size-2-3);
   margin-top: var(--size-2-2);
-}
-
-/* The status bar */
-.synclo-status {
-  cursor: pointer;
 }
 
 /* Find */

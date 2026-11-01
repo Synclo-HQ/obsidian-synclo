@@ -119,6 +119,18 @@ export function sliceBySubpath(body: string, subpath: string): string | null {
   return lines.slice(from, to).join("\n");
 }
 
+/** Whether the lines end inside an open %% comment (an odd number of %%
+ *  marks outside code). */
+function opensComment(lines: string[]): boolean {
+  let marks = 0;
+  let fence = false;
+  for (const l of lines) {
+    if (/^[ \t]*(`{3,}|~{3,})/.test(l)) fence = !fence;
+    if (!fence) marks += (l.match(/%%/g) ?? []).length;
+  }
+  return marks % 2 === 1;
+}
+
 function jsonDrawingText(json: string): string {
   try {
     const data = JSON.parse(json) as { elements?: unknown };
@@ -150,10 +162,14 @@ export function drawingText(body: string): string {
   if (/^\s*\{/.test(body)) return jsonDrawingText(body);
   const lines = body.split("\n");
   const dataAt = lines.findIndex((l) => /^#{1,2} Excalidraw Data[ \t]*$/.test(l));
-  const prose = (dataAt === -1 ? [] : lines.slice(0, dataAt))
-    .filter((l) => !/^==⚠/.test(l) && !/^%%[ \t]*$/.test(l))
-    .join("\n")
-    .trim();
+  // The prose above the data. The data block is wrapped in a comment that
+  // may open just above "# Excalidraw Data": the prose stops where that
+  // comment starts. Comments the person wrote in the prose stay whole, so
+  // the cleaner leaves them out with everything inside them.
+  const above = (dataAt === -1 ? [] : lines.slice(0, dataAt)).filter((l) => !/^==⚠/.test(l));
+  while (above.length && (above[above.length - 1] ?? "").trim() === "") above.pop();
+  if (above.length && /^%%[ \t]*$/.test(above[above.length - 1] ?? "") && opensComment(above)) above.pop();
+  const prose = above.join("\n").trim();
   const from = dataAt === -1 ? 0 : dataAt;
   const textAt = lines.findIndex((l, i) => i >= from && /^#{1,2} Text Elements[ \t]*$/.test(l));
   const labels: string[] = [];

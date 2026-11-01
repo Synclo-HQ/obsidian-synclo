@@ -155,6 +155,13 @@ describe("drawings", () => {
     expect(drawingText(d)).toBe("Notes about it\n\nLabel one\nLabel two");
   });
 
+  it("keeps a comment in a drawing's prose whole, so none of it is sent", () => {
+    const d = "Notes\n%%\nsecret plan\n%%\nPublic line\n%%\n# Excalidraw Data\n## Text Elements\nLabel one ^abcdefgh\n%%\n## Drawing\n```json\n{}\n```\n%%";
+    const text = clean(drawingText(d)).text;
+    expect(text).toBe("Notes\n\nPublic line\n\nLabel one");
+    expect(text).not.toContain("secret");
+  });
+
   it("reads a plain .excalidraw file's text elements", () => {
     const json = JSON.stringify({ type: "excalidraw", elements: [{ type: "rectangle" }, { type: "text", text: "Inbox" }, { type: "text", text: "Gone", isDeleted: true }, { type: "text", text: " Done " }] });
     expect(drawingText(json)).toBe("Inbox\nDone");

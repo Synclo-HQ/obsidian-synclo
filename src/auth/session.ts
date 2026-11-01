@@ -17,9 +17,18 @@ export interface SecretStore {
   set(id: string, value: string): void;
 }
 
+/** Obsidian's local storage for this vault on this device. */
+export interface LocalStore {
+  load(key: string): unknown;
+  /** null removes the value. */
+  save(key: string, value: unknown): void;
+}
+
 export interface SessionDeps {
   http: Http;
   secrets: SecretStore;
+  /** Where a sign-in waiting for its answer is kept. */
+  local: LocalStore;
   crypto: Crypto;
   now: () => number;
   /** The server address in use (normalized). */
@@ -41,7 +50,10 @@ interface Pending {
 }
 
 export const SECRET_TOKENS = "synclo-sign-in";
+/** Where a waiting sign-in was kept before it moved to local storage
+ *  (read once, then cleared). */
 export const SECRET_PENDING = "synclo-sign-in-pending";
+export const LOCAL_PENDING = "synclo-sign-in-pending";
 /** A sign-in started longer ago than this is not finished (Synclo's code
  *  lasts 10 minutes). */
 const PENDING_LIFE_MS = 15 * 60 * 1000;
@@ -62,6 +74,7 @@ export type SignedOutReason = "disconnected" | "expired";
 export class Session {
   private refreshing: Promise<Stored> | null = null;
   private listeners = new Set<(signedIn: boolean, reason?: SignedOutReason) => void>();
+  private endedListeners = new Set<() => void>();
 
   constructor(private readonly deps: SessionDeps) {}
 
@@ -73,6 +86,14 @@ export class Session {
   onChange(listener: (signedIn: boolean, reason?: SignedOutReason) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** A sign-in came back without connecting (declined, failed, or an
+   *  answer no sign-in was waiting for): whatever waits on it shows
+   *  Connect again. */
+  onSignInEnded(listener: () => void): () => void {
+    this.endedListeners.add(listener);
+    return () => this.endedListeners.delete(listener);
   }
 
   /** A working access token, refreshed when it is about to expire. */
@@ -128,14 +149,25 @@ export class Session {
     return { url: authorizeUrl(base, await challengeFor(this.deps.crypto, verifier), state), pending };
   }
 
-  /** Kept in secret storage, so a phone that closes Obsidian while the
-   *  browser is open can still finish the sign-in. */
+  /** Kept in this vault's local storage on this device, so a phone that
+   *  closes Obsidian while the browser is open can still finish the
+   *  sign-in. */
   private keep(pending: Pending): void {
-    this.deps.secrets.set(SECRET_PENDING, JSON.stringify(pending));
+    this.deps.local.save(LOCAL_PENDING, pending);
+  }
+
+  private clearPending(): void {
+    this.deps.local.save(LOCAL_PENDING, null);
   }
 
   /** Finishes a sign-in from the obsidian://synclo-auth answer. */
   async finishSignIn(params: Record<string, string>, vaultName: string): Promise<SignInResult> {
+    const result = await this.finish(params, vaultName);
+    if (result.kind === "declined" || result.kind === "failed" || result.kind === "stale") for (const l of this.endedListeners) l();
+    return result;
+  }
+
+  private async finish(params: Record<string, string>, vaultName: string): Promise<SignInResult> {
     const state = params.state ?? "";
     const pending = this.loadPending();
     if (!pending || !state || pending.state !== state) {
@@ -146,7 +178,7 @@ export class Session {
       return { kind: "stale" };
     }
     // One answer per sign-in.
-    this.deps.secrets.set(SECRET_PENDING, "");
+    this.clearPending();
     if (this.deps.now() - pending.createdAt > PENDING_LIFE_MS) return { kind: "stale" };
     if (params.error) {
       if (params.error === "access_denied") return { kind: "declined" };
@@ -188,7 +220,12 @@ export class Session {
     if (!current) throw new SyncloError("signed-out", MESSAGES.signedOut);
     this.refreshing = (async () => {
       try {
-        const next = await refreshTokens(this.deps.http, current.base, current.refresh, this.deps.now);
+        const next = await refreshTokens(this.deps.http, current.base, current.refresh, this.deps.now, (late) => {
+          // The answer came after the wait was given up. Its refresh token
+          // is the one that works now, unless a later refresh already
+          // replaced the one sent (or the person disconnected).
+          if (this.load()?.refresh === current.refresh) this.save({ ...late, v: 1, base: current.base });
+        });
         const stored: Stored = { ...next, v: 1, base: current.base };
         // The old refresh token no longer works: keep the new one first.
         this.save(stored);
@@ -228,15 +265,24 @@ export class Session {
   }
 
   private loadPending(): Pending | null {
-    const raw = this.deps.secrets.get(SECRET_PENDING);
-    if (!raw) return null;
-    try {
-      const p = JSON.parse(raw) as Partial<Pending>;
-      if (p.v !== 1 || typeof p.state !== "string" || typeof p.verifier !== "string" || typeof p.base !== "string" || typeof p.createdAt !== "number") return null;
-      return p as Pending;
-    } catch {
-      return null;
+    let value: unknown = this.deps.local.load(LOCAL_PENDING);
+    // A sign-in started before it moved here: read once, then moved.
+    const old = this.deps.secrets.get(SECRET_PENDING);
+    if (old) {
+      this.deps.secrets.set(SECRET_PENDING, "");
+      if (value === null || value === undefined) {
+        try {
+          value = JSON.parse(old) as unknown;
+          this.deps.local.save(LOCAL_PENDING, value);
+        } catch {
+          value = null;
+        }
+      }
     }
+    if (typeof value !== "object" || value === null) return null;
+    const p = value as Partial<Pending>;
+    if (p.v !== 1 || typeof p.state !== "string" || typeof p.verifier !== "string" || typeof p.base !== "string" || typeof p.createdAt !== "number") return null;
+    return p as Pending;
   }
 
   private emit(signedIn: boolean, reason?: SignedOutReason): void {

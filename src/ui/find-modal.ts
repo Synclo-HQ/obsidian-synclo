@@ -2,6 +2,7 @@ import { SuggestModal, setIcon, type Editor, type TFile } from "obsidian";
 import { messageFor } from "../api/errors";
 import type { Presentation } from "../api/synclo";
 import type { SyncloHost } from "../host";
+import { markdownLink } from "../util/link-text";
 
 /** Where a found presentation can go: the note open when Find started. */
 export interface FindContext {
@@ -87,19 +88,24 @@ class FoundModal extends SuggestModal<FoundAction> {
       { command: "esc", purpose: "to dismiss" },
     ]);
     const { editor, file } = context;
+    // A download belongs to the open note only when the note's own link is
+    // this presentation; otherwise it goes to the attachment folder and no
+    // note is touched.
+    const owner = file && host.noteDocumentId(file) === p.id ? file : null;
     this.actions = [
       ...(editor
         ? [
             {
               label: "Insert a link to it here",
               icon: "link",
-              run: () => editor.replaceSelection(`[${p.title.replace(/[[\]]/g, "")}](${p.editUrl})`),
+              // Selected words stay, as the link's text.
+              run: () => editor.replaceSelection(markdownLink(editor.getSelection(), p.title, p.editUrl)),
             },
           ]
         : []),
       { label: "Open in Synclo", icon: "external-link", run: () => host.openExternal(p.editUrl) },
-      { label: "Download as PowerPoint", icon: "presentation", run: () => void host.download(p.id, "pptx", file, p.title) },
-      { label: "Download as PDF", icon: "file-text", run: () => void host.download(p.id, "pdf", file, p.title) },
+      { label: "Download as PowerPoint", icon: "presentation", run: () => void host.download(p.id, "pptx", owner, p.title) },
+      { label: "Download as PDF", icon: "file-text", run: () => void host.download(p.id, "pdf", owner, p.title) },
     ];
   }
 

@@ -12,8 +12,12 @@ export interface HttpRequest {
   body?: string | ArrayBuffer;
   contentType?: string;
   /** Give up waiting after this long. The request itself can't be
-   *  stopped (requestUrl has no abort); its answer is ignored. */
+   *  stopped (requestUrl has no abort); its answer is ignored, unless
+   *  `late` takes it. */
   timeoutMs: number;
+  /** An answer that arrives after the wait was given up (the token
+   *  endpoint keeps a rotated refresh token this way). */
+  late?: (response: HttpResponse) => void;
 }
 
 export interface HttpResponse {

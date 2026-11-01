@@ -15,6 +15,8 @@ export type Status = "queued" | "running" | "completed" | "failed";
 
 export interface Account {
   workspace: string;
+  /** The workspace's id, when Synclo gives one. */
+  workspaceId: string | null;
   balance: number | null;
   planId: string;
   slidesPerPrompt: number | null;
@@ -146,7 +148,13 @@ export class SyncloApi {
     const ws = isRecord(r.workspace) ? r.workspace : {};
     const credits = isRecord(r.credits) ? r.credits : {};
     const plan = isRecord(r.plan) ? r.plan : {};
-    return { workspace: str(ws.name, "your workspace"), balance: num(credits.balance), planId: str(plan.id), slidesPerPrompt: num(plan.slides_per_prompt) };
+    return {
+      workspace: str(ws.name, "your workspace"),
+      workspaceId: typeof ws.id === "string" && ws.id ? ws.id : null,
+      balance: num(credits.balance),
+      planId: str(plan.id),
+      slidesPerPrompt: num(plan.slides_per_prompt),
+    };
   }
 
   async themes(): Promise<Theme[]> {

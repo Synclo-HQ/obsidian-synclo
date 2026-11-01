@@ -164,6 +164,27 @@ describe("a selection", () => {
     expect(m.text).toBe("# Apollo launch plan\n\n## Risks\n\n- The payment provider review may take two weeks.\n- Our designer is away for a week.");
   });
 
+  it("reads a selection that starts inside a code block as code, and its comments as comments", async () => {
+    const note = fixtureNote("Short note.md");
+    const before = "---\ntitle: Notes\n---\nIntro\n\n```js\nconst a = 1;\n";
+    const selection = "const b = 2; // %% kept, it is code %%\n```\n\nText %%a secret%% after.\n%%\nAlso secret\n%%\nEnd.";
+    const m = await buildMaterial({ ...note, markdown: selection, selection: true, before }, fixtureReader, { includeLinked: false });
+    expect(m.text).toBe("# Short note\n\n```js\nconst b = 2; // %% kept, it is code %%\n```\n\nText after.\n\nEnd.");
+  });
+
+  it("reads a selection that starts inside a comment as hidden until it closes", async () => {
+    const note = fixtureNote("Short note.md");
+    const m = await buildMaterial({ ...note, markdown: "still private %% Shown words.", selection: true, before: "Intro %% private start\n" }, fixtureReader, { includeLinked: false });
+    expect(m.text).toBe("# Short note\n\nShown words.");
+    expect(describeLeftOut(m.leftOut)).toBe("private comments");
+  });
+
+  it("closes a code block a selection ends inside", async () => {
+    const note = fixtureNote("Short note.md");
+    const m = await buildMaterial({ ...note, markdown: "Steps:\n\n```\nnpm test", selection: true, before: "x\n" }, fixtureReader, { includeLinked: false });
+    expect(m.text).toBe("# Short note\n\nSteps:\n\n```\nnpm test\n```");
+  });
+
   it("drops the frontmatter when the selection starts at the top", async () => {
     const note = fixtureNote("Projects/Apollo launch.md");
     const m = await buildMaterial({ ...note, markdown: note.markdown.slice(0, 120), selection: true, selectionAtStart: true }, fixtureReader, { includeLinked: false });

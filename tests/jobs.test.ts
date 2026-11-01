@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SyncloError } from "../src/api/errors";
 import { parseGeneration, type Generation } from "../src/api/synclo";
-import { parseJobs, progressText, type PendingJob } from "../src/jobs/jobs";
+import { parseJobs, progressText, sameWorkspace, type PendingJob, type WorkspaceRef } from "../src/jobs/jobs";
 import { JobRunner, type RunnerEvents } from "../src/jobs/runner";
 
 const BASE = "https://synclo.app";
@@ -24,10 +24,20 @@ describe("progress in words", () => {
   it("reads saved jobs defensively", () => {
     expect(parseJobs([job(), { nope: true }, null, "x"])).toEqual([job()]);
     expect(parseJobs(null)).toEqual([]);
+    expect(parseJobs([{ ...job(), workspace: { name: "Studio Nine", id: 7 } }])).toEqual([job({ workspace: { name: "Studio Nine" } })]);
+  });
+
+  it("matches workspaces by id when both have one, else by name", () => {
+    expect(sameWorkspace(job(), null)).toBe(true);
+    expect(sameWorkspace(job({ workspace: { name: "A" } }), null)).toBe(false);
+    expect(sameWorkspace(job({ workspace: { name: "A" } }), { name: "A" })).toBe(true);
+    expect(sameWorkspace(job({ workspace: { name: "A", id: "1" } }), { name: "Renamed", id: "1" })).toBe(true);
+    expect(sameWorkspace(job({ workspace: { name: "A", id: "1" } }), { name: "A", id: "2" })).toBe(false);
+    expect(sameWorkspace(job({ workspace: { name: "A" } }), { name: "A", id: "1" })).toBe(true);
   });
 });
 
-function runner(answers: Array<Generation | Error | "hang">, options: { signedIn?: () => boolean; now?: () => number; saved?: PendingJob[] } = {}) {
+function runner(answers: Array<Generation | Error | "hang">, options: { signedIn?: () => boolean; now?: () => number; saved?: PendingJob[]; workspace?: WorkspaceRef | null } = {}) {
   let saved: PendingJob[] = options.saved ?? [];
   const log: string[] = [];
   const asked: number[] = [];
@@ -66,6 +76,7 @@ function runner(answers: Array<Generation | Error | "hang">, options: { signedIn
     isSignedIn: options.signedIn ?? (() => true),
     waitSeconds: () => 30,
   });
+  if (options.workspace !== undefined) r.setWorkspace(options.workspace);
   return { r, log, finished, saved: () => saved, asked };
 }
 
@@ -132,11 +143,62 @@ describe("following a presentation", () => {
     expect(t.log).toEqual(["ready:Q3 review"]);
   });
 
-  it("gives up on a job after three hours", async () => {
+  it("gives up on a job after three hours only if Synclo still says it is being made", async () => {
     const t = runner([gen({ status: "running" })], { now: () => 4 * 60 * 60 * 1000 });
     t.r.add(job());
     await t.finished;
     expect(t.log).toEqual(["failed:timed_out"]);
+    expect(t.asked).toEqual([0]);
+  });
+
+  it("delivers a deck that finished overnight", async () => {
+    const t = runner([done], { now: () => 12 * 60 * 60 * 1000 });
+    t.r.add(job());
+    await t.finished;
+    expect(t.log).toEqual(["ready:Q3 review"]);
+    expect(t.asked).toEqual([0]);
+  });
+
+  it("tries again after a refusal that names no final reason", async () => {
+    const t = runner([new SyncloError("rejected", "Something went wrong on Synclo's side.", { code: "tool_error" }), new SyncloError("rejected", "x", { code: "server_error" }), done]);
+    t.r.add(job());
+    await t.finished;
+    expect(t.log.filter((l) => l.startsWith("trouble"))).toHaveLength(2);
+    expect(t.log[t.log.length - 1]).toBe("ready:Q3 review");
+  });
+
+  it("ends a job Synclo says this account can't see", async () => {
+    const t = runner([new SyncloError("rejected", "Not a member", { code: "forbidden" })]);
+    t.r.add(job());
+    await t.finished;
+    expect(t.log).toEqual(["failed:forbidden"]);
+  });
+
+  it("leaves a job made in another workspace untouched", async () => {
+    const theirs = job({ workspace: { name: "Studio Nine" } });
+    const t = runner([done], { saved: [theirs], workspace: { name: "Other team" } });
+    t.r.resumeAll();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(t.asked).toEqual([]);
+    expect(t.saved()).toEqual([theirs]);
+    t.r.setWorkspace({ name: "Studio Nine" });
+    t.r.resumeAll();
+    await t.finished;
+    expect(t.log).toEqual(["ready:Q3 review"]);
+  });
+
+  it("waits to learn the workspace before following a job that names one", async () => {
+    const t = runner([done], { saved: [job({ workspace: { name: "Studio Nine" } })] });
+    t.r.resumeAll();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(t.asked).toEqual([]);
+  });
+
+  it("follows a job saved before workspaces were kept, in any workspace", async () => {
+    const t = runner([done], { saved: [job()], workspace: { name: "Other team" } });
+    t.r.resumeAll();
+    await t.finished;
+    expect(t.log).toEqual(["ready:Q3 review"]);
   });
 
   it("follows a job once even when added twice", async () => {

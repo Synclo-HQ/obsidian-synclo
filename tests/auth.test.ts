@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { SyncloError } from "../src/api/errors";
 import { authorizeUrl, normalizeBase } from "../src/auth/oauth";
 import { base64url, challengeFor, fromBase64url, makeState, vaultOfState } from "../src/auth/pkce";
-import { SECRET_PENDING, SECRET_TOKENS, Session } from "../src/auth/session";
-import { fakeHttp, form, memorySecrets } from "./fake-http";
+import { LOCAL_PENDING, SECRET_PENDING, SECRET_TOKENS, Session } from "../src/auth/session";
+import { NetworkError } from "../src/api/http";
+import { fakeHttp, form, memoryLocal, memorySecrets } from "./fake-http";
 
 const crypto = webcrypto as unknown as Crypto;
 const BASE = "https://synclo.app";
@@ -12,8 +13,9 @@ const BASE = "https://synclo.app";
 function session(handler: Parameters<typeof fakeHttp>[0], now = () => 1_000_000) {
   const { http, requests } = fakeHttp(handler);
   const secrets = memorySecrets();
-  const s = new Session({ http, secrets, crypto, now, base: () => BASE });
-  return { s, secrets, requests };
+  const local = memoryLocal();
+  const s = new Session({ http, secrets, local, crypto, now, base: () => BASE });
+  return { s, secrets, local, requests };
 }
 
 function signedIn(secrets: ReturnType<typeof memorySecrets>, expiresAt: number, refresh = "syr_1", access = "syo_1") {
@@ -67,10 +69,11 @@ describe("the server address", () => {
 
 describe("signing in", () => {
   it("exchanges the code with the verifier and keeps the tokens in secret storage", async () => {
-    const { s, secrets, requests } = session(() => ({ status: 200, body: { access_token: "syo_a", refresh_token: "syr_a", expires_in: 3600, token_type: "Bearer", scope: "presentations:read presentations:write" } }));
+    const { s, secrets, local, requests } = session(() => ({ status: 200, body: { access_token: "syo_a", refresh_token: "syr_a", expires_in: 3600, token_type: "Bearer", scope: "presentations:read presentations:write" } }));
     const url = new URL(await s.startSignIn("Vault"));
     const state = url.searchParams.get("state") ?? "";
-    const pending = JSON.parse(secrets.get(SECRET_PENDING) ?? "{}") as { verifier: string };
+    const pending = local.load(LOCAL_PENDING) as { verifier: string };
+    expect(secrets.get(SECRET_PENDING)).toBeNull();
     const result = await s.finishSignIn({ action: "synclo-auth", code: "c0de", state, iss: BASE }, "Vault");
     expect(result).toEqual({ kind: "connected" });
     expect(form(requests[0]!)).toEqual({
@@ -82,15 +85,15 @@ describe("signing in", () => {
       resource: "https://synclo.app/mcp",
     });
     expect(await challengeFor(crypto, pending.verifier)).toBe(url.searchParams.get("code_challenge"));
-    expect(secrets.get(SECRET_PENDING)).toBeNull();
+    expect(local.load(LOCAL_PENDING)).toBeNull();
     expect(JSON.parse(secrets.get(SECRET_TOKENS) ?? "{}")).toMatchObject({ access: "syo_a", refresh: "syr_a", base: BASE });
     expect(s.isSignedIn()).toBe(true);
   });
 
   it("opens a prepared sign-in at once and still checks it on return", async () => {
-    const { s, secrets } = session(() => ({ status: 200, body: { access_token: "a", refresh_token: "r", expires_in: 3600 } }));
+    const { s, local } = session(() => ({ status: 200, body: { access_token: "a", refresh_token: "r", expires_in: 3600 } }));
     await s.prepareSignIn("Vault");
-    expect(secrets.get(SECRET_PENDING)).toBeNull();
+    expect(local.load(LOCAL_PENDING)).toBeNull();
     const url = s.takePreparedSignIn();
     expect(url).toMatch(/^https:\/\/synclo\.app\/oauth\/authorize\?/);
     expect(s.takePreparedSignIn()).toBeNull();
@@ -121,6 +124,25 @@ describe("signing in", () => {
     expect(await s.finishSignIn({ code: "c", state: other, iss: BASE, vault: "Personal" }, "Work")).toEqual({ kind: "stale" });
   });
 
+  it("finishes a sign-in started before the waiting sign-in moved to local storage", async () => {
+    const { s, secrets, local } = session(() => ({ status: 200, body: { access_token: "a", refresh_token: "r", expires_in: 3600 } }));
+    const state = makeState(crypto, "Vault");
+    secrets.set(SECRET_PENDING, JSON.stringify({ v: 1, state, verifier: "v".repeat(43), base: BASE, createdAt: 1_000_000 }));
+    expect((await s.finishSignIn({ code: "c", state, iss: BASE }, "Vault")).kind).toBe("connected");
+    expect(secrets.get(SECRET_PENDING)).toBeNull();
+    expect(local.load(LOCAL_PENDING)).toBeNull();
+  });
+
+  it("tells whoever waits that a sign-in ended without connecting", async () => {
+    const { s } = session(() => ({ status: 200, body: {} }));
+    let ended = 0;
+    s.onSignInEnded(() => ended++);
+    const state = new URL(await s.startSignIn("Vault")).searchParams.get("state") ?? "";
+    await s.finishSignIn({ error: "access_denied", state, iss: BASE }, "Vault");
+    await s.finishSignIn({ code: "c", state: "old.VmF1bHQ", iss: BASE }, "Vault");
+    expect(ended).toBe(2);
+  });
+
   it("says when the person chose not to connect", async () => {
     const { s } = session(() => ({ status: 200, body: {} }));
     const state = new URL(await s.startSignIn("Vault")).searchParams.get("state") ?? "";
@@ -144,6 +166,37 @@ describe("staying signed in", () => {
     expect(await all).toEqual(["syo_2", "syo_2", "syo_2"]);
     expect(calls).toBe(1);
     expect(form(requests[0]!)).toEqual({ grant_type: "refresh_token", refresh_token: "syr_1", client_id: "synclo-obsidian", resource: "https://synclo.app/mcp" });
+    expect((JSON.parse(secrets.get(SECRET_TOKENS) ?? "{}") as { refresh: string }).refresh).toBe("syr_2");
+  });
+
+  it("keeps a rotated refresh token that arrives after the wait was given up", async () => {
+    let late: ((r: { status: number; headers: Record<string, string>; text: () => string; arrayBuffer: () => ArrayBuffer }) => void) | undefined;
+    const secrets = memorySecrets();
+    const http = async (req: { late?: typeof late }) => {
+      late = req.late;
+      throw new NetworkError("too slow", true);
+    };
+    const s = new Session({ http, secrets, local: memoryLocal(), crypto, now: () => 1_000_000, base: () => BASE });
+    signedIn(secrets, 0, "syr_1");
+    await expect(s.accessToken()).rejects.toMatchObject({ kind: "network" });
+    const body = JSON.stringify({ access_token: "syo_late", refresh_token: "syr_late", expires_in: 3600 });
+    late?.({ status: 200, headers: {}, text: () => body, arrayBuffer: () => new ArrayBuffer(0) });
+    expect((JSON.parse(secrets.get(SECRET_TOKENS) ?? "{}") as { refresh: string }).refresh).toBe("syr_late");
+  });
+
+  it("drops a late refresh answer once a later refresh replaced the token", async () => {
+    let late: ((r: { status: number; headers: Record<string, string>; text: () => string; arrayBuffer: () => ArrayBuffer }) => void) | undefined;
+    const secrets = memorySecrets();
+    const http = async (req: { late?: typeof late }) => {
+      late = req.late;
+      throw new NetworkError("too slow", true);
+    };
+    const s = new Session({ http, secrets, local: memoryLocal(), crypto, now: () => 1_000_000, base: () => BASE });
+    signedIn(secrets, 0, "syr_1");
+    await expect(s.accessToken()).rejects.toMatchObject({ kind: "network" });
+    signedIn(secrets, 9_999_999_999, "syr_2", "syo_2");
+    const body = JSON.stringify({ access_token: "syo_late", refresh_token: "syr_late", expires_in: 3600 });
+    late?.({ status: 200, headers: {}, text: () => body, arrayBuffer: () => new ArrayBuffer(0) });
     expect((JSON.parse(secrets.get(SECRET_TOKENS) ?? "{}") as { refresh: string }).refresh).toBe("syr_2");
   });
 
@@ -175,7 +228,7 @@ describe("staying signed in", () => {
     const { http, requests } = fakeHttp(() => ({ status: 200, body: {} }));
     const secrets = memorySecrets();
     signedIn(secrets, 9_999_999_999);
-    const s = new Session({ http, secrets, crypto, now: () => 0, base: () => "http://localhost:3000" });
+    const s = new Session({ http, secrets, local: memoryLocal(), crypto, now: () => 0, base: () => "http://localhost:3000" });
     expect(s.isSignedIn()).toBe(false);
     await expect(s.accessToken()).rejects.toMatchObject({ kind: "signed-out" });
     expect(requests).toHaveLength(0);
