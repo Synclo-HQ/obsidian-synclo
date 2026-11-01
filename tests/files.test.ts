@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fetchFile, freePath, safeFileName } from "../src/files";
+import { downloadName, fetchFile, freePath, safeFileName, withFileLink } from "../src/files";
 import { DEFAULT_SETTINGS, lengthOptions, parseSettings } from "../src/settings";
 import { fakeHttp, type FakeAnswer } from "./fake-http";
 
@@ -40,6 +40,24 @@ describe("file names", () => {
     const taken = new Set(["Notes/Q3.pptx", "Notes/Q3 1.pptx"]);
     expect(freePath("Notes", "Q3.pptx", (p) => taken.has(p))).toBe("Notes/Q3 2.pptx");
     expect(freePath("", "Q3.pdf", () => false)).toBe("Q3.pdf");
+  });
+});
+
+describe("naming a download", () => {
+  it("prefers the presentation's title, then the note's", () => {
+    expect(downloadName("Q3 in review.pptx", "pptx", ["Q3 notes"])).toBe("Q3 in review.pptx");
+    expect(downloadName("Untitled.pptx", "pptx", ["Q3 notes"])).toBe("Q3 notes.pptx");
+    expect(downloadName("", "pdf", ["", "Q3 notes"])).toBe("Q3 notes.pdf");
+    expect(downloadName("", "pdf", [])).toBe("Presentation.pdf");
+  });
+});
+
+describe("the note's list of files", () => {
+  it("adds a file once and keeps what was there", () => {
+    expect(withFileLink(undefined, "[[Q3.pptx]]")).toEqual(["[[Q3.pptx]]"]);
+    expect(withFileLink("[[Old.pdf]]", "[[Q3.pptx]]")).toEqual(["[[Old.pdf]]", "[[Q3.pptx]]"]);
+    expect(withFileLink(["[[Q3.pptx]]", 7], "[[Q3.pptx]]")).toEqual(["[[Q3.pptx]]", 7]);
+    expect(withFileLink(null, "[[Q3.pdf]]")).toEqual(["[[Q3.pdf]]"]);
   });
 });
 

@@ -1,4 +1,4 @@
-import { Modal, Notice, Setting, type TFile } from "obsidian";
+import { Modal, Notice, Setting, setIcon, type TFile } from "obsidian";
 import { SyncloError, isOutOfCredits, messageFor } from "../api/errors";
 import { utf8Length } from "../api/http";
 import type { Format, Mode } from "../api/synclo";
@@ -53,6 +53,9 @@ export class MakeModal extends Modal {
 
   private summaryEl!: HTMLElement;
   private bodyEl!: HTMLElement;
+  /** The cost, any error, the privacy line and the buttons: pinned to the
+   *  bottom of the window, however long the preview above it. */
+  private footerEl!: HTMLElement;
 
   constructor(
     private readonly host: SyncloHost,
@@ -68,6 +71,7 @@ export class MakeModal extends Modal {
     this.setTitle(this.choices.format === "document" ? "Make a document" : "Make a presentation");
     this.summaryEl = this.contentEl.createDiv({ cls: "synclo-summary" });
     this.bodyEl = this.contentEl.createDiv({ cls: "synclo-body" });
+    this.footerEl = this.contentEl.createDiv({ cls: "synclo-footer" });
     this.unsubscribe = this.host.session.onChange((signedIn) => {
       this.waitingForSignIn = false;
       this.error = null;
@@ -160,7 +164,11 @@ export class MakeModal extends Modal {
     const tooLong = this.tooLong();
     if (tooLong) el.createDiv({ cls: "synclo-warning", text: tooLong });
 
-    const toggle = el.createEl("button", { cls: "synclo-link-button", text: this.previewOpen ? "Hide the text" : "Preview the text" });
+    const toggle = el.createEl("button", { cls: "synclo-disclosure" });
+    toggle.toggleClass("is-open", this.previewOpen);
+    toggle.setAttribute("aria-expanded", String(this.previewOpen));
+    setIcon(toggle.createSpan({ cls: "synclo-disclosure-icon" }), "chevron-right");
+    toggle.createSpan({ text: "Preview the text" });
     toggle.addEventListener("click", () => {
       this.previewOpen = !this.previewOpen;
       this.renderSummary();
@@ -185,10 +193,12 @@ export class MakeModal extends Modal {
 
   private renderBody(): void {
     const el = this.bodyEl;
+    const footer = this.footerEl;
     el.empty();
+    footer.empty();
     this.drawnFrom = this.accountKey();
     if (!this.host.session.isSignedIn()) {
-      this.renderConnect(el);
+      this.renderConnect(el, footer);
       return;
     }
     const choices = el.createDiv({ cls: "synclo-choices" });
@@ -197,13 +207,13 @@ export class MakeModal extends Modal {
     if (this.busy) {
       for (const input of choices.findAll("select, input, textarea")) input.setAttribute("disabled", "");
     }
-    this.renderEstimate(el.createDiv({ cls: "synclo-estimate" }));
-    if (this.error) this.renderError(el.createDiv({ cls: "synclo-error" }));
-    el.createDiv({ cls: "synclo-privacy", text: PRIVACY_LINE });
-    this.renderButtons(el.createDiv({ cls: "synclo-buttons" }));
+    this.renderEstimate(footer.createDiv({ cls: "synclo-estimate" }));
+    if (this.error) this.renderError(footer.createDiv({ cls: "synclo-error" }));
+    footer.createDiv({ cls: "synclo-privacy", text: PRIVACY_LINE });
+    this.renderButtons(footer.createDiv({ cls: "synclo-buttons" }));
   }
 
-  private renderConnect(el: HTMLElement): void {
+  private renderConnect(el: HTMLElement, footer: HTMLElement): void {
     this.host.prepareConnect();
     const box = el.createDiv({ cls: "synclo-connect" });
     if (this.waitingForSignIn) {
@@ -211,8 +221,8 @@ export class MakeModal extends Modal {
     } else {
       box.createDiv({ text: "Connect Synclo to make presentations from your notes. You sign in at synclo.app; a free account comes with 400 credits." });
     }
-    el.createDiv({ cls: "synclo-privacy", text: PRIVACY_LINE });
-    const row = el.createDiv({ cls: "synclo-buttons" });
+    footer.createDiv({ cls: "synclo-privacy", text: PRIVACY_LINE });
+    const row = footer.createDiv({ cls: "synclo-buttons" });
     const connect = row.createEl("button", { cls: "mod-cta", text: this.waitingForSignIn ? "Open the sign-in page again" : "Connect" });
     connect.addEventListener("click", () => {
       this.waitingForSignIn = true;

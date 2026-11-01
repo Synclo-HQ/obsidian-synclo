@@ -66,3 +66,28 @@ export function freePath(folder: string, fileName: string, taken: (path: string)
   for (let i = 1; taken(path) && i < 1000; i++) path = join(`${stem} ${i}${ext}`);
   return path;
 }
+
+/** Words that name no presentation in particular. */
+const PLACEHOLDER = /^(untitled|presentation|document|deck)$/i;
+
+/**
+ * The name a downloaded file is saved under: the presentation's title (as
+ * Synclo names the file), else the first of `fallbacks` (the note's title),
+ * made safe for every system.
+ */
+export function downloadName(exportName: string, extension: string, fallbacks: string[]): string {
+  const ext = extension.replace(/^\./, "").toLowerCase();
+  let stem = exportName.trim();
+  if (stem.toLowerCase().endsWith(`.${ext}`)) stem = stem.slice(0, -(ext.length + 1)).trim();
+  const usable = (s: string) => s.trim() !== "" && !PLACEHOLDER.test(s.trim());
+  const chosen = usable(stem) ? stem : (fallbacks.find(usable) ?? stem);
+  return safeFileName(chosen, ext, "Presentation");
+}
+
+/** The list property's new value with `link` in it once: an existing
+ *  value (a list, one string, or nothing) is kept as it is. */
+export function withFileLink(existing: unknown, link: string): unknown[] {
+  const list: unknown[] = Array.isArray(existing) ? [...(existing as unknown[])] : typeof existing === "string" && existing.trim() ? [existing] : [];
+  if (!list.some((x) => typeof x === "string" && x.trim() === link)) list.push(link);
+  return list;
+}

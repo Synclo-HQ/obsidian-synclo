@@ -7,10 +7,24 @@ export interface NoticeAction {
   primary?: boolean;
 }
 
+export interface RichNotice {
+  title: string;
+  line?: string;
+  detail?: string;
+  actions?: NoticeAction[];
+  /** Milliseconds; 0 (the default) stays until closed. */
+  duration?: number;
+}
+
 /** A notice with a title, a line, and buttons. Clicking a button runs it
  *  and closes the notice. */
-export function richNotice(options: { title: string; line?: string; detail?: string; actions?: NoticeAction[]; duration?: number }): Notice {
-  const fragment = createFragment((f) => {
+export function richNotice(options: RichNotice): Notice {
+  return new Notice(richContent(options), options.duration ?? 0);
+}
+
+/** A rich notice's content, for changing it in place with setMessage. */
+export function richContent(options: RichNotice): DocumentFragment {
+  return createFragment((f) => {
     const box = f.createDiv({ cls: "synclo-notice" });
     box.createDiv({ cls: "synclo-notice-title", text: options.title });
     if (options.line) box.createDiv({ cls: "synclo-notice-line", text: options.line });
@@ -23,7 +37,6 @@ export function richNotice(options: { title: string; line?: string; detail?: str
       }
     }
   });
-  return new Notice(fragment, options.duration ?? 0);
 }
 
 /** The same notice's words, changed in place. */

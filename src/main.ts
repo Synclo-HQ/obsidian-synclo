@@ -4,7 +4,7 @@ import { McpClient } from "./api/mcp";
 import { SyncloApi, documentIdOf, type Account, type FileFormat, type Generation, type Theme } from "./api/synclo";
 import { DEFAULT_BASE, normalizeBase } from "./auth/oauth";
 import { Session } from "./auth/session";
-import { fetchFile, freePath, safeFileName } from "./files";
+import { downloadName, fetchFile, freePath, withFileLink } from "./files";
 import type { SyncloHost } from "./host";
 import { parseJobs, unit, type PendingJob } from "./jobs/jobs";
 import { JobRunner } from "./jobs/runner";
@@ -13,12 +13,15 @@ import { secretStore } from "./obsidian/secrets";
 import { DEFAULT_SETTINGS, parseSettings, type SyncloSettings } from "./settings";
 import { FindModal } from "./ui/find-modal";
 import { MakeModal } from "./ui/make-modal";
-import { richNotice } from "./ui/notices";
+import { richContent, richNotice, type NoticeAction } from "./ui/notices";
 import { ProgressView } from "./ui/progress";
 import { SyncloSettingTab } from "./ui/settings-tab";
 
 /** The frontmatter key the presentation's link is written to. */
 const LINK_KEY = "synclo";
+/** The list property that links the files downloaded for a note (Obsidian's
+ *  file list hides PowerPoint files, so the note keeps the way to them). */
+const FILES_KEY = "synclo files";
 /** Presentations being made on this device (this vault's local storage). */
 const JOBS_KEY = "synclo-pending-jobs";
 const ACCOUNT_FRESH_MS = 60_000;
@@ -30,6 +33,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
   api!: SyncloApi;
   runner!: JobRunner;
   private progress!: ProgressView;
+  private settingsTab!: SyncloSettingTab;
   private http = obsidianHttp();
   private accountCache: { value: Account; at: number } | null = null;
   private themesCache: Theme[] | null = null;
@@ -60,7 +64,8 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
       waitSeconds: () => (Platform.isMobile ? 15 : 30),
     });
 
-    this.addSettingTab(new SyncloSettingTab(this, this));
+    this.settingsTab = new SyncloSettingTab(this, this);
+    this.addSettingTab(this.settingsTab);
     this.registerObsidianProtocolHandler("synclo-auth", (params) => void this.onSignInReturn(params));
     this.register(
       this.session.onChange((signedIn, reason) => {
@@ -232,16 +237,26 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     try {
       const link = await this.api.exportFile(documentId, format);
       const bytes = await fetchFile(this.http, link.url);
-      const name = safeFileName(link.name || title, format, title || "Presentation");
+      const name = downloadName(link.name, format, [title, near ? this.noteTitle(near) : ""]);
       const path = await this.savePath(name, near);
       const saved = await this.app.vault.createBinary(path, bytes);
+      const linked = near ? await this.linkFile(near, saved) : false;
       working.hide();
-      const folder = saved.parent && !saved.parent.isRoot() ? saved.parent.path : "the vault's top folder";
+      const attachments = this.settings.saveTo === "attachments";
+      const place = near ? (attachments ? "In your attachments folder" : "Next to this note") : saved.parent && !saved.parent.isRoot() ? `In ${saved.parent.path}` : "In the vault's top folder";
+      const where = linked ? (attachments ? `${place}; the link is in the note's properties.` : `${place}; the link is in its properties.`) : `${place}.`;
       richNotice({
         title: `Saved “${saved.name}”`,
-        line: `In ${folder}.`,
-        duration: 10_000,
-        actions: format === "pdf" ? [{ label: "Open", run: () => void this.app.workspace.getLeaf(true).openFile(saved) }] : [],
+        line: where,
+        actions: [
+          {
+            label: "Open",
+            primary: true,
+            // A PDF opens in Obsidian (in a new tab); a PowerPoint file in
+            // the app the system opens it with.
+            run: () => void this.app.workspace.openLinkText(saved.path, near?.path ?? "", format === "pdf"),
+          },
+        ],
       });
     } catch (err) {
       working.hide();
@@ -249,6 +264,28 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     } finally {
       this.downloading = false;
     }
+  }
+
+  /** Adds a downloaded file to the note's "synclo files" property, once.
+   *  Other properties are left as they are. */
+  private async linkFile(note: TFile, file: TFile): Promise<boolean> {
+    if (note.extension !== "md") return false;
+    // The file's name when it finds the file from this note, else its path.
+    const linkpath = this.app.metadataCache.getFirstLinkpathDest(file.name, note.path)?.path === file.path ? file.name : file.path;
+    try {
+      await this.app.fileManager.processFrontMatter(note, (fm: Record<string, unknown>) => {
+        fm[FILES_KEY] = withFileLink(fm[FILES_KEY], `[[${linkpath}]]`);
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** A note's title: its frontmatter title, else its name. */
+  private noteTitle(file: TFile): string {
+    const t: unknown = this.app.metadataCache.getFileCache(file)?.frontmatter?.title;
+    return typeof t === "string" && t.trim() ? t.trim() : file.basename;
   }
 
   /* ── Commands, menus, sign-in ───────────────────────────────────────── */
@@ -277,12 +314,12 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     this.addCommand({
       id: "download-pptx",
       name: "Download this note's presentation as PowerPoint",
-      checkCallback: (checking) => this.withLink(checking, (file, id) => void this.download(id, "pptx", file, file.basename)),
+      checkCallback: (checking) => this.withLink(checking, (file, id) => void this.download(id, "pptx", file, this.noteTitle(file))),
     });
     this.addCommand({
       id: "download-pdf",
       name: "Download this note's presentation as PDF",
-      checkCallback: (checking) => this.withLink(checking, (file, id) => void this.download(id, "pdf", file, file.basename)),
+      checkCallback: (checking) => this.withLink(checking, (file, id) => void this.download(id, "pdf", file, this.noteTitle(file))),
     });
     this.addCommand({
       id: "open-presentation",
@@ -398,9 +435,16 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     const result = await this.session.finishSignIn(params, vault);
     switch (result.kind) {
       case "connected": {
+        // Shown at once, then filled in when the workspace arrives.
+        const note = this.activeNote();
+        const actions: NoticeAction[] = note ? [{ label: `Make a presentation from “${this.noteTitle(note)}”`, primary: true, run: () => this.make(note) }] : [];
+        const notice = richNotice({ title: "Connected to Synclo", line: "Getting your workspace…", actions });
+        this.settingsTab.redraw();
         const account = await this.account(true);
-        void this.themes(true);
-        new Notice(account ? `Connected to Synclo: ${account.workspace}.` : "Connected to Synclo.");
+        void this.themes(true).then(() => this.settingsTab.redraw());
+        const line = account ? (account.balance !== null ? `${account.workspace} · ${account.balance.toLocaleString()} credits` : account.workspace) : "Ready to make presentations from your notes.";
+        notice.setMessage(richContent({ title: "Connected to Synclo", line, actions }));
+        this.settingsTab.redraw();
         return;
       }
       case "declined":

@@ -32,11 +32,12 @@ export class SyncloSettingTab extends PluginSettingTab {
     private readonly host: SyncloHost,
   ) {
     super(host.app, plugin);
+    // Connected or not, the tab shows it at once (the plugin fetches the
+    // account after a sign-in and calls redraw again).
     plugin.register(
       host.session.onChange(() => {
         this.signingIn = false;
         this.redraw();
-        void this.refresh();
       }),
     );
   }
@@ -66,18 +67,22 @@ export class SyncloSettingTab extends PluginSettingTab {
     }
   }
 
-  /** Draws the tab again, whichever way Obsidian draws it. */
-  private redraw(): void {
-    if (!this.containerEl.isConnected) return;
+  /** Draws the tab again, whichever way Obsidian draws it. Cheap, and
+   *  harmless when the tab isn't open (it is drawn afresh when it opens). */
+  redraw(): void {
     const declared = this as unknown as { update?: () => void };
     if (typeof declared.update === "function") declared.update();
     else this.drawByHand();
   }
 
   private refreshing = false;
+  private refreshedAt = 0;
+  /** Fetches the account and themes when the tab opens (at most every 30
+   *  seconds: a redraw reads the rows again, and must not fetch again). */
   private async refresh(): Promise<void> {
-    if (!this.host.session.isSignedIn() || this.refreshing) return;
+    if (!this.host.session.isSignedIn() || this.refreshing || Date.now() - this.refreshedAt < 30_000) return;
     this.refreshing = true;
+    this.refreshedAt = Date.now();
     const before = JSON.stringify([this.host.cachedAccount(), this.host.cachedThemes()?.length]);
     try {
       await Promise.all([this.host.account(true), this.host.themes(true)]);
