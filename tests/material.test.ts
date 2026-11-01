@@ -6,9 +6,9 @@ import { describeLeftOut } from "../src/material/left-out";
 import { expected, fakeUrls, fixtureNote, fixtureReader } from "./helpers";
 
 /**
- * The awkward notes in tests/fixtures/vault, each made into material and
+ * The test notes in tests/fixtures/vault, each made into material and
  * compared with tests/fixtures/expected/<name>.txt (the exact text Synclo
- * receives, pictures at stand-in addresses). Run with UPDATE_EXPECTED=1 to
+ * receives, with test addresses for pictures). Run with UPDATE_EXPECTED=1 to
  * rewrite the expected files after a deliberate change, then read the diff.
  */
 

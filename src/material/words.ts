@@ -9,9 +9,8 @@
 /** Scripts written without spaces between words. */
 const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/gu;
 
-/** Synclo's own count (apps/web/src/lib/create-limits.ts wordCount): runs
- *  of non-space, and in scripts written without spaces about one word for
- *  every two characters. Keep the two the same. */
+/** Words as Synclo counts them for its limits: runs of non-space, and in
+ *  scripts written without spaces, one word for every two characters. */
 export function serverWordCount(text: string): number {
   const t = text.trim();
   if (!t) return 0;

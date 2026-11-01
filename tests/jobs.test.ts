@@ -24,7 +24,7 @@ describe("progress in words", () => {
   it("reads saved jobs defensively", () => {
     expect(parseJobs([job(), { nope: true }, null, "x"])).toEqual([job()]);
     expect(parseJobs(null)).toEqual([]);
-    expect(parseJobs([{ ...job(), workspace: { name: "Studio Nine", id: 7 } }])).toEqual([job({ workspace: { name: "Studio Nine" } })]);
+    expect(parseJobs([{ ...job(), workspace: { name: "Example Studio", id: 7 } }])).toEqual([job({ workspace: { name: "Example Studio" } })]);
   });
 
   it("matches workspaces by id when both have one, else by name", () => {
@@ -175,20 +175,20 @@ describe("following a presentation", () => {
   });
 
   it("leaves a job made in another workspace untouched", async () => {
-    const theirs = job({ workspace: { name: "Studio Nine" } });
+    const theirs = job({ workspace: { name: "Example Studio" } });
     const t = runner([done], { saved: [theirs], workspace: { name: "Other team" } });
     t.r.resumeAll();
     await new Promise((r) => setTimeout(r, 5));
     expect(t.asked).toEqual([]);
     expect(t.saved()).toEqual([theirs]);
-    t.r.setWorkspace({ name: "Studio Nine" });
+    t.r.setWorkspace({ name: "Example Studio" });
     t.r.resumeAll();
     await t.finished;
     expect(t.log).toEqual(["ready:Q3 review"]);
   });
 
   it("waits to learn the workspace before following a job that names one", async () => {
-    const t = runner([done], { saved: [job({ workspace: { name: "Studio Nine" } })] });
+    const t = runner([done], { saved: [job({ workspace: { name: "Example Studio" } })] });
     t.r.resumeAll();
     await new Promise((r) => setTimeout(r, 5));
     expect(t.asked).toEqual([]);

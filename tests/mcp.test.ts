@@ -23,8 +23,8 @@ const argsOf = (r: { body?: string | ArrayBuffer }) => (JSON.parse(r.body as str
 
 describe("calling a tool", () => {
   it("sends one JSON-RPC message with the bearer token", async () => {
-    const { api, requests } = client(() => rpcResult({ workspace: { name: "Studio Nine" }, credits: { balance: 400 }, plan: { id: "free", slides_per_prompt: 10 } }));
-    expect(await api.account()).toEqual({ workspace: "Studio Nine", workspaceId: null, balance: 400, planId: "free", slidesPerPrompt: 10 });
+    const { api, requests } = client(() => rpcResult({ workspace: { name: "Example Studio" }, credits: { balance: 400 }, plan: { id: "free", slides_per_prompt: 10 } }));
+    expect(await api.account()).toEqual({ workspace: "Example Studio", workspaceId: null, balance: 400, planId: "free", slidesPerPrompt: 10 });
     const req = requests[0]!;
     expect(req.url).toBe("https://synclo.app/mcp");
     expect(req.headers?.Authorization).toBe("Bearer syo_1");
