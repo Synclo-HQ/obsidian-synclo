@@ -119,6 +119,22 @@ export function sliceBySubpath(body: string, subpath: string): string | null {
   return lines.slice(from, to).join("\n");
 }
 
+function jsonDrawingText(json: string): string {
+  try {
+    const data = JSON.parse(json) as { elements?: unknown };
+    if (!Array.isArray(data.elements)) return "";
+    return data.elements
+      .map((el: unknown) => {
+        const e = el as { type?: unknown; text?: unknown; isDeleted?: unknown };
+        return e.type === "text" && typeof e.text === "string" && e.isDeleted !== true ? e.text.trim() : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  } catch {
+    return "";
+  }
+}
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -130,6 +146,8 @@ function escapeRegExp(s: string): string {
  * the prose and the labels are words a presentation can use.
  */
 export function drawingText(body: string): string {
+  // A plain .excalidraw file is the drawing's JSON: its text elements' words.
+  if (/^\s*\{/.test(body)) return jsonDrawingText(body);
   const lines = body.split("\n");
   const dataAt = lines.findIndex((l) => /^#{1,2} Excalidraw Data[ \t]*$/.test(l));
   const prose = (dataAt === -1 ? [] : lines.slice(0, dataAt))

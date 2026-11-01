@@ -144,6 +144,12 @@ describe("drawings", () => {
     const d = "Notes about it\n\n# Excalidraw Data\n## Text Elements\nLabel one ^abcdefgh\n\nLabel two ^ijklmnop\n%%\n## Drawing\n```json\n{}\n```\n%%";
     expect(drawingText(d)).toBe("Notes about it\n\nLabel one\nLabel two");
   });
+
+  it("reads a plain .excalidraw file's text elements", () => {
+    const json = JSON.stringify({ type: "excalidraw", elements: [{ type: "rectangle" }, { type: "text", text: "Inbox" }, { type: "text", text: "Gone", isDeleted: true }, { type: "text", text: " Done " }] });
+    expect(drawingText(json)).toBe("Inbox\nDone");
+    expect(drawingText("{ not json")).toBe("");
+  });
 });
 
 describe("words", () => {

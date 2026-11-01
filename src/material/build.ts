@@ -1,5 +1,5 @@
 import { EMBED_TOKENS, MARK, PICTURE_TOKENS, cleanMarkdown, pictureToken, type CleanResult, type EmbedRef } from "./clean";
-import { frontmatterTitle, isDrawingFrontmatter, splitFrontmatter } from "./frontmatter";
+import { frontmatterTitle, isDrawingFrontmatter, normalizeNewlines, splitFrontmatter } from "./frontmatter";
 import { LeftOut, type LeftOutKind } from "./left-out";
 import { altFromFileName, embedAlt, kindOfExtension, kindOfLinkpath, linkDisplay, pictureType, safeAlt } from "./links";
 import { drawingText, headingsOf, sliceBySubpath } from "./slice";
@@ -197,7 +197,7 @@ export async function buildMaterial(input: NoteInput, reader: VaultReader, optio
   };
 
   // The note itself.
-  let markdown = input.markdown;
+  let markdown = normalizeNewlines(input.markdown);
   let fmTitle: string | null = null;
   let drawing = kindOfExtension(input.file.extension, input.file.path) === "drawing";
   if (!input.selection || input.selectionAtStart) {
