@@ -27,6 +27,9 @@ export interface SyncloHost {
   /** The themes a presentation can use; cached for the session. */
   themes(force?: boolean): Promise<Theme[] | null>;
   cachedThemes(): Theme[] | null;
+  /** Uploads one of a note's pictures; the same file unchanged is sent
+   *  once, so trying again sends the very same request. */
+  uploadPicture(file: TFile, type: string): Promise<string>;
   /** Makes a file of a presentation and saves it in the vault. */
   download(documentId: string, format: FileFormat, near: TFile | null, title: string): Promise<void>;
   openExternal(url: string): void;

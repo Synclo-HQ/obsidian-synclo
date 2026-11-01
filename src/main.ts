@@ -34,6 +34,8 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
   private accountCache: { value: Account; at: number } | null = null;
   private themesCache: Theme[] | null = null;
   private downloading = false;
+  /** Pictures already uploaded, by file and version. */
+  private uploaded = new Map<string, string>();
 
   async onload(): Promise<void> {
     this.settings = parseSettings(await this.loadData());
@@ -64,6 +66,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
       this.session.onChange((signedIn, reason) => {
         this.accountCache = null;
         this.themesCache = null;
+        this.uploaded.clear();
         if (signedIn) {
           this.progress.signedIn();
           this.runner.resumeAll();
@@ -160,6 +163,15 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
 
   creditsUrl(): string {
     return `${this.base()}/pricing`;
+  }
+
+  async uploadPicture(file: TFile, type: string): Promise<string> {
+    const key = `${this.base()}|${file.path}|${file.stat.mtime}|${file.stat.size}`;
+    const known = this.uploaded.get(key);
+    if (known) return known;
+    const url = await this.mcp.uploadPicture(await this.app.vault.readBinary(file), type);
+    this.uploaded.set(key, url);
+    return url;
   }
 
   startJob(job: PendingJob): void {

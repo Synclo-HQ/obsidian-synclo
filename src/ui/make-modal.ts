@@ -94,17 +94,23 @@ export class MakeModal extends Modal {
     return JSON.stringify([this.host.cachedAccount(), this.host.cachedThemes()?.map((t) => t.id)]);
   }
 
+  private buildSeq = 0;
+
   private async rebuild(): Promise<void> {
+    const seq = ++this.buildSeq;
     const run = (async () => {
       this.material = null;
       this.renderSummary();
       const text = this.source.selection ?? (await this.host.app.vault.cachedRead(this.source.file));
       const f = this.source.file;
-      this.material = await buildMaterial(
+      const built = await buildMaterial(
         { file: { path: f.path, basename: f.basename, extension: f.extension, size: f.stat.size }, markdown: text, selection: this.source.selection !== undefined, selectionAtStart: this.source.selectionAtStart },
         vaultReader(this.host.app),
         { includeLinked: this.choices.includeLinked },
       );
+      // A later rebuild (Include linked notes turned again) wins.
+      if (seq !== this.buildSeq) return;
+      this.material = built;
       this.renderSummary();
       this.renderBody();
     })();
@@ -112,6 +118,7 @@ export class MakeModal extends Modal {
     try {
       await run;
     } catch {
+      if (seq !== this.buildSeq) return;
       this.summaryEl.empty();
       this.summaryEl.createDiv({ cls: "synclo-summary-title", text: this.source.file.basename });
       this.summaryEl.createDiv({ cls: "synclo-warning", text: "This note couldn't be read. Close this window and try again." });
@@ -184,7 +191,12 @@ export class MakeModal extends Modal {
       this.renderConnect(el);
       return;
     }
-    this.renderChoices(el.createDiv({ cls: "synclo-choices" }));
+    const choices = el.createDiv({ cls: "synclo-choices" });
+    this.renderChoices(choices);
+    // Nothing changes while it is being sent.
+    if (this.busy) {
+      for (const input of choices.findAll("select, input, textarea")) input.setAttribute("disabled", "");
+    }
     this.renderEstimate(el.createDiv({ cls: "synclo-estimate" }));
     if (this.error) this.renderError(el.createDiv({ cls: "synclo-error" }));
     el.createDiv({ cls: "synclo-privacy", text: PRIVACY_LINE });
@@ -380,7 +392,7 @@ export class MakeModal extends Modal {
             continue;
           }
           try {
-            urls.set(pic.n, await this.host.mcp.uploadPicture(await this.host.app.vault.readBinary(file), pic.type));
+            urls.set(pic.n, await this.host.uploadPicture(file, pic.type));
           } catch (err) {
             if (err instanceof SyncloError && err.kind === "rejected") skipped++;
             else if (err instanceof SyncloError && err.kind === "rate-limited") {
