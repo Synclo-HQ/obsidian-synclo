@@ -636,7 +636,8 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
         // Shown at once, then filled in when the workspace arrives.
         // With a make window open, it carries on there instead.
         const note = makeWindowOpen() ? null : this.activeNote();
-        const actions: NoticeAction[] = note ? [{ label: `Make a presentation from “${this.noteTitle(note)}”`, primary: true, run: () => this.make(note) }] : [];
+        // The command's own name: a button's label never carries a note's title.
+        const actions: NoticeAction[] = note ? [{ label: "Make a presentation from this note", primary: true, run: () => this.make(note) }] : [];
         const notice = richNotice({ title: "Connected to Synclo", line: "Getting your workspace…", actions });
         this.settingsTab.redraw();
         const account = await this.account(true);
