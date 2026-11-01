@@ -557,6 +557,22 @@ body:not(.is-mobile) .synclo-panel .synclo-panel-hero:focus-within button.synclo
   gap: var(--size-2-3);
 }
 
+/* On a phone the actions are full width, one under another, as in the
+   panel. */
+.is-phone .synclo-deck-actions {
+  flex-direction: column;
+}
+
+.is-phone .synclo-deck-actions button {
+  width: 100%;
+}
+
+/* On a phone Obsidian's navigation bar floats over the bottom of a view:
+   the slides stay above it, as in Obsidian's own views. */
+.is-phone .workspace-leaf-content .view-content.synclo-deck {
+  padding-bottom: calc(var(--view-bottom-spacing, var(--safe-area-inset-bottom, 0px)) + var(--size-4-4));
+}
+
 .synclo-deck-stage {
   position: relative;
   flex: 1 1 0;

@@ -39,6 +39,8 @@ const JOBS_KEY = "synclo-pending-jobs";
 /** The deck the Synclo panel shows (this vault's local storage). */
 const PANEL_KEY = "synclo-panel-deck";
 const ACCOUNT_FRESH_MS = 60_000;
+/** How long "Connected to Synclo" stays (sooner when a presentation starts). */
+const CONNECTED_MS = 15_000;
 const timers: Timers = { set: (fn, ms) => window.setTimeout(fn, ms), clear: (id) => window.clearTimeout(id) };
 
 export default class SyncloPlugin extends Plugin implements SyncloHost {
@@ -61,6 +63,8 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
   /** Generations started, and found ready, while the plugin runs. */
   private startedIds = new Set<string>();
   private readyIds = new Set<string>();
+  /** "Connected to Synclo", until a presentation starts. */
+  private connectedNotice: Notice | null = null;
   /** The workspace last learned, to notice a change. */
   private workspaceKey: string | null = null;
 
@@ -346,6 +350,9 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
       return;
     }
     this.startedIds.add(job.generationId);
+    // "Connected" has done its job once a presentation starts.
+    this.connectedNotice?.hide();
+    this.connectedNotice = null;
     const account = this.cachedAccount();
     if (account && !job.workspace) job.workspace = workspaceOf(account);
     // The panel follows the deck made last; on a computer Make opens it.
@@ -441,7 +448,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     this.downloading = true;
     // The file is named after the presentation, which only the export knows,
     // so this names no title the saved file might not carry.
-    const working = richNotice({ title: `Making the ${label} file`, line: "This can take a minute or two." });
+    const working = richNotice({ title: `Making the ${label} file`, line: "This can take a minute or two.", duration: 0 });
     try {
       const link = await this.api.exportFile(documentId, format);
       const bytes = await fetchFile(this.http, link.url);
@@ -660,7 +667,11 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
         const note = makeWindowOpen() ? null : this.activeNote();
         // The command's own name: a button's label never carries a note's title.
         const actions: NoticeAction[] = note ? [{ label: "Make a presentation from this note", primary: true, run: () => this.make(note) }] : [];
-        const notice = richNotice({ title: "Connected to Synclo", line: "Getting your workspace…", actions });
+        // The person is right here, back from signing in: it says so and
+        // goes, its button only a shortcut (the command stays).
+        const notice = richNotice({ title: "Connected to Synclo", line: "Getting your workspace…", actions, duration: CONNECTED_MS });
+        this.connectedNotice?.hide();
+        this.connectedNotice = notice;
         this.settingsTab.redraw();
         const account = await this.account(true);
         void this.themes(true).then(() => this.settingsTab.redraw());

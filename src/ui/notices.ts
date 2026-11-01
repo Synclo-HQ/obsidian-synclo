@@ -1,4 +1,5 @@
 import { Notice } from "obsidian";
+import { noticeDuration } from "./notice-time";
 
 export interface NoticeAction {
   label: string;
@@ -12,14 +13,16 @@ export interface RichNotice {
   line?: string;
   detail?: string;
   actions?: NoticeAction[];
-  /** Milliseconds; 0 (the default) stays until closed. */
+  /** Milliseconds; 0 stays until closed. By default a notice with a
+   *  button stays until it's used or closed, and one without leaves on its
+   *  own (noticeDuration). */
   duration?: number;
 }
 
 /** A notice with a title, a line, and buttons. Clicking a button runs it
  *  and closes the notice. */
 export function richNotice(options: RichNotice): Notice {
-  return new Notice(richContent(options), options.duration ?? 0);
+  return new Notice(richContent(options), noticeDuration(options));
 }
 
 /** A rich notice's content, for changing it in place with setMessage. */
