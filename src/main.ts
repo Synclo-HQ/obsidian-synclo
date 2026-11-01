@@ -325,7 +325,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     });
     this.addCommand({
       id: "open-presentation",
-      name: "Open this note's presentation in Synclo",
+      name: "Open this note's presentation in your browser",
       checkCallback: (checking) => this.withLink(checking, (file) => this.openExternal(this.linkOf(file) ?? "")),
     });
     this.addCommand({
