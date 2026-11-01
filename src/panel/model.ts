@@ -1,4 +1,5 @@
 import type { CardState } from "../api/card";
+import type { ProgressInput } from "../jobs/jobs";
 
 /**
  * What the Synclo panel shows, worked out from Synclo's `card_state`
@@ -57,16 +58,35 @@ export function heroSlide(slides: PanelSlide[], lastChanged: number | null, pick
   return 0;
 }
 
+/** Where a generation stands, from the panel's answer. */
+export function cardProgressInput(card: CardState): ProgressInput {
+  return {
+    status: card.status,
+    title: card.title,
+    step: card.step,
+    started: card.step !== null || card.frames.length > 0,
+    total: card.frames.length,
+    written: card.frames.filter((f) => f.written).length,
+    slideTitles: card.frames.map((f) => f.title),
+    pictures: card.pictures,
+  };
+}
+
 /** How far the bar is filled, 0 to 1; null before the plan (the bar then
  *  runs without a measure). The slides being written make most of it,
  *  then their images, then finishing. */
 export function progressShare(card: CardState): number | null {
-  if (card.status === "completed") return 1;
-  const total = card.frames.length;
+  return shareOf(cardProgressInput(card));
+}
+
+/** The bar's fill for where a generation stands, from either answer. */
+export function shareOf(input: ProgressInput): number | null {
+  if (input.status === "completed") return 1;
+  const total = input.total;
   if (!total) return null;
-  const written = card.frames.filter((f) => f.written).length;
+  const written = Math.min(input.written, total);
   if (written === 0) return 0.04;
-  const pics = card.pictures;
+  const pics = input.pictures;
   const images = pics && pics.total > 0 ? Math.min(1, pics.made / pics.total) : written >= total ? 1 : 0;
   const finishing = written >= total && images >= 1 ? 0.04 : 0;
   return Math.min(1, 0.04 + 0.66 * (written / total) + 0.26 * images + finishing);

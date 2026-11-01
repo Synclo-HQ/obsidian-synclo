@@ -2,14 +2,16 @@ import { Platform } from "obsidian";
 import { MESSAGES, SyncloError } from "../api/errors";
 import type { Generation } from "../api/synclo";
 import type { SyncloHost } from "../host";
-import { progressText, type PendingJob } from "../jobs/jobs";
+import { progressInputOf, progressWords, type PendingJob } from "../jobs/jobs";
 import type { RunnerEvents } from "../jobs/runner";
 import { richNotice } from "./notices";
 import { noteNameOf } from "./panel-view";
 
 interface Shown {
-  title: string;
-  short: string;
+  job: PendingJob;
+  /** A check failed for a reason that may pass: said in place of the
+   *  progress until the next answer. */
+  trouble: string | null;
 }
 
 /** About how long the start notice stays. */
@@ -17,9 +19,10 @@ const START_NOTICE_MS = 8_000;
 
 /**
  * What the person sees while a presentation is made. The Synclo panel shows
- * the deck as it arrives; here, a short notice at the start (on a phone it
- * offers Watch, which opens the panel) and, on desktop, one line in the
- * status bar that opens the panel when clicked.
+ * the deck as it arrives; here, a short notice at the start when the panel
+ * can't be seen (on a phone it offers Watch, which opens the panel) and, on
+ * desktop, one line in the status bar that opens the panel when clicked.
+ * The line reads the same progress the panel does (the progress board).
  */
 export class ProgressView implements RunnerEvents {
   private shown = new Map<string, Shown>();
@@ -38,9 +41,24 @@ export class ProgressView implements RunnerEvents {
     }
   }
 
+  /** The newest progress changed (from either answer): the line follows. */
+  boardChanged(generationId: string): void {
+    const s = this.shown.get(generationId);
+    if (!s) return;
+    s.trouble = null;
+    this.renderStatus();
+  }
+
   /** A presentation has just been started. */
   started(job: PendingJob): void {
     this.signedOutTold = false;
+    this.shown.set(job.generationId, { job, trouble: null });
+    this.renderStatus();
+  }
+
+  /** The start notice: on a phone always (with Watch); on a computer only
+   *  when the panel couldn't be shown, since the panel opening says it. */
+  startNotice(job: PendingJob): void {
     const name = noteNameOf(job.notePath);
     if (Platform.isMobile) {
       richNotice({
@@ -52,17 +70,19 @@ export class ProgressView implements RunnerEvents {
     } else {
       richNotice({ title: `Making “${name}”`, line: "Follow it in the Synclo panel.", duration: START_NOTICE_MS });
     }
-    this.update(job, job.title || name, "waiting to start");
   }
 
   progress(job: PendingJob, gen: Generation): void {
-    const t = progressText(job, gen);
-    this.update(job, t.title, t.short);
+    if (!this.shown.has(job.generationId)) this.shown.set(job.generationId, { job, trouble: null });
+    // The board says when it changed (boardChanged), here or from the panel.
+    this.host.progressBoard.update(job.generationId, progressInputOf(gen));
+    this.renderStatus();
   }
 
   trouble(job: PendingJob, error: unknown): void {
     const kind = error instanceof SyncloError ? error.kind : "network";
-    this.update(job, this.shown.get(job.generationId)?.title ?? job.title, kind === "network" ? "waiting for a connection" : "checking again soon");
+    this.shown.set(job.generationId, { job, trouble: kind === "network" ? "waiting for a connection" : "checking again soon" });
+    this.renderStatus();
   }
 
   async ready(job: PendingJob, gen: Generation): Promise<void> {
@@ -103,11 +123,6 @@ export class ProgressView implements RunnerEvents {
     this.renderStatus();
   }
 
-  private update(job: PendingJob, title: string, short: string): void {
-    this.shown.set(job.generationId, { title, short });
-    this.renderStatus();
-  }
-
   private close(id: string): void {
     this.shown.delete(id);
     this.renderStatus();
@@ -122,7 +137,11 @@ export class ProgressView implements RunnerEvents {
       return;
     }
     this.status.show();
-    this.status.setText(all.length === 1 ? `Synclo · ${all[0]?.short ?? ""}` : `Synclo · making ${all.length} presentations`);
+    const one = all.length === 1 ? all[0] : undefined;
+    if (one) {
+      const input = this.host.progressBoard.get(one.job.generationId) ?? progressInputOf(null);
+      this.status.setText(`Synclo · ${one.trouble ?? progressWords(input, one.job.format, one.job.title).short}`);
+    } else this.status.setText(`Synclo · making ${all.length} presentations`);
     this.status.setAttribute("aria-label", "Show progress");
   }
 }

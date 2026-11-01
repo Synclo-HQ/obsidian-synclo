@@ -2,7 +2,8 @@ import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
 import type { CardState } from "../api/card";
 import type { SyncloHost } from "../host";
 import { progressWords, unit, type PendingJob } from "../jobs/jobs";
-import { changedSlide, heroSlide, imageKey, panelSlides, progressShare, type PanelSlide } from "../panel/model";
+import { progressInputOf } from "../jobs/jobs";
+import { cardProgressInput, changedSlide, heroSlide, imageKey, panelSlides, shareOf, type PanelSlide } from "../panel/model";
 import { CardPoller } from "../panel/poller";
 
 export const PANEL_VIEW = "synclo-panel";
@@ -92,6 +93,12 @@ export class SyncloPanelView extends ItemView {
     this.registerDomEvent(document, "visibilitychange", () => this.wake());
     this.registerEvent(this.app.workspace.on("layout-change", () => this.wake()));
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.wake()));
+    // Where it stands follows the newest answer, the job runner's too.
+    this.register(
+      this.host.progressBoard.onChange((id) => {
+        if (id === this.target?.generationId) this.render();
+      }),
+    );
     // The link line follows the note's properties.
     this.registerEvent(
       this.app.metadataCache.on("changed", (file) => {
@@ -156,6 +163,9 @@ export class SyncloPanelView extends ItemView {
     if (changed !== null) this.lastChanged = changed;
     this.card = card;
     this.slides = slides;
+    // Shared with the status bar; the board tells when it changed. Drawn
+    // here too, for the slides even when where it stands is unchanged.
+    if (this.target) this.host.progressBoard.update(this.target.generationId, cardProgressInput(card));
     this.render();
   }
 
@@ -290,27 +300,17 @@ export class SyncloPanelView extends ItemView {
     p.from.setText(`From “${name}”`);
     p.title.setText(card && card.frames.length ? (card.title ?? card.document?.title ?? name) : name);
 
-    const words = progressWords(
-      {
-        status: card?.status ?? "queued",
-        title: card?.title ?? null,
-        step: card?.step ?? null,
-        started: !!card && (card.step !== null || card.frames.length > 0),
-        total: card?.frames.length ?? 0,
-        written: card?.frames.filter((f) => f.written).length ?? 0,
-        slideTitles: [],
-        pictures: card?.pictures ?? null,
-      },
-      format,
-      name,
-      false,
-    );
+    // Where it stands: the newest answer, this panel's or the job runner's
+    // (the status bar reads the same).
+    const progress = this.host.progressBoard.get(target.generationId) ?? (card ? cardProgressInput(card) : progressInputOf(null));
+    const words = progressWords(progress, format, name, false);
+    const done = ready || progress.status === "completed";
     const statusLine = failed ? (card?.error?.message ?? "") : words.line;
     p.status.setText(statusLine);
-    p.status.toggle(!ready && !!statusLine);
+    p.status.toggle(!done && !!statusLine);
 
-    const share = card ? progressShare(card) : null;
-    p.bar.toggle(!ready && !failed);
+    const share = shareOf(progress);
+    p.bar.toggle(!done && !failed);
     p.bar.toggleClass("is-waiting", share === null);
     p.bar.setCssProps({ "--synclo-progress": share === null ? "" : `${Math.round(share * 100)}%` });
 

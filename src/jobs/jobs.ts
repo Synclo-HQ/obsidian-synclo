@@ -89,23 +89,24 @@ export interface ProgressInput {
   pictures: { made: number; total: number } | null;
 }
 
+/** Where a generation stands, from the job runner's answer. */
+export function progressInputOf(gen: Generation | null): ProgressInput {
+  const p = gen?.progress ?? null;
+  return {
+    status: gen?.status ?? "queued",
+    title: p?.title || gen?.document?.title || null,
+    step: p?.step ?? null,
+    started: !!p,
+    total: p?.total ?? 0,
+    written: p?.written ?? 0,
+    slideTitles: p?.slides.map((s) => s.title) ?? [],
+    pictures: p?.pictures ?? null,
+  };
+}
+
 /** What to tell the person about a generation in progress. */
 export function progressText(job: PendingJob, gen: Generation | null): ProgressText {
-  const p = gen?.progress ?? null;
-  return progressWords(
-    {
-      status: gen?.status ?? "queued",
-      title: p?.title || gen?.document?.title || null,
-      step: p?.step ?? null,
-      started: !!p,
-      total: p?.total ?? 0,
-      written: p?.written ?? 0,
-      slideTitles: p?.slides.map((s) => s.title) ?? [],
-      pictures: p?.pictures ?? null,
-    },
-    job.format,
-    job.title,
-  );
+  return progressWords(progressInputOf(gen), job.format, job.title);
 }
 
 /** The words for where a generation stands. `named` lists the first

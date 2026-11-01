@@ -7,6 +7,7 @@ import { Session } from "./auth/session";
 import { downloadName, fetchFile, freePath, withFileLink } from "./files";
 import type { SyncloHost } from "./host";
 import { parseJobs, unit, type PendingJob, type WorkspaceRef } from "./jobs/jobs";
+import { ProgressBoard } from "./jobs/progress-board";
 import { JobRunner } from "./jobs/runner";
 import { obsidianHttp } from "./obsidian/http";
 import { secretStore } from "./obsidian/secrets";
@@ -40,6 +41,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
   mcp!: McpClient;
   api!: SyncloApi;
   runner!: JobRunner;
+  progressBoard = new ProgressBoard();
   private progress!: ProgressView;
   private settingsTab!: SyncloSettingTab;
   private http = obsidianHttp();
@@ -64,6 +66,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     this.mcp = new McpClient({ http: this.http, session: this.session, base, now });
     this.api = new SyncloApi(this.mcp);
     this.progress = new ProgressView(this, Platform.isDesktopApp ? this.addStatusBarItem() : null);
+    this.register(this.progressBoard.onChange((id) => this.progress.boardChanged(id)));
     this.runner = new JobRunner({
       generation: (id, wait) => this.api.generation(id, wait),
       store: {
@@ -266,9 +269,24 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     if (account && !job.workspace) job.workspace = workspaceOf(account);
     // The panel follows the deck made last; on a computer Make opens it.
     this.setPanelTarget(job);
-    if (!Platform.isMobile) void this.revealPanel();
     this.progress.started(job);
     this.runner.add(job);
+    if (Platform.isMobile) this.progress.startNotice(job);
+    else void this.openPanelFor(job);
+  }
+
+  /** Opens the panel for a deck just started; the start notice says it
+   *  only if the panel didn't end up on screen (a sidebar that stayed
+   *  collapsed, a view that failed to open). */
+  private async openPanelFor(job: PendingJob): Promise<void> {
+    try {
+      await this.revealPanel();
+      // Laid out first, so "on screen" is measured as drawn.
+      await nextFrame();
+    } catch {
+      // Told below.
+    }
+    if (!this.panelVisible()) this.progress.startNotice(job);
   }
 
   noteDocumentId(file: TFile): string | null {

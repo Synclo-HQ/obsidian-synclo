@@ -3,6 +3,7 @@ import type { McpClient } from "./api/mcp";
 import type { Account, FileFormat, Generation, SyncloApi, Theme } from "./api/synclo";
 import type { Session } from "./auth/session";
 import type { PendingJob } from "./jobs/jobs";
+import type { ProgressBoard } from "./jobs/progress-board";
 import type { JobRunner } from "./jobs/runner";
 import type { SyncloSettings } from "./settings";
 
@@ -14,6 +15,9 @@ export interface SyncloHost {
   api: SyncloApi;
   mcp: McpClient;
   runner: JobRunner;
+  /** The newest word on each generation, from whichever answer came last;
+   *  the status bar and the panel both read it. */
+  progressBoard: ProgressBoard;
   base(): string;
   saveSettings(): Promise<void>;
   /** Opens Synclo's sign-in in the browser. */
