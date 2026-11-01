@@ -234,11 +234,15 @@ export class MakeModal extends Modal {
     const el = this.summaryEl;
     el.empty();
     const m = this.material;
-    // The note by its file name, as the Synclo panel names it.
+    // The note by its file name, as the Synclo panel names it, unless the
+    // title below is that name already.
     const fileName = this.source.file.basename;
-    el.createDiv({ cls: "synclo-summary-from", text: this.source.selection !== undefined ? `From the selection in “${fileName}”` : `From “${fileName}”` });
+    const title = m ? m.title : fileName;
+    const selection = this.source.selection !== undefined;
+    const from = title.trim() === fileName.trim() ? (selection ? "From the selection" : "From the note") : selection ? `From the selection in “${fileName}”` : `From “${fileName}”`;
+    el.createDiv({ cls: "synclo-summary-from", text: from });
     if (!m) {
-      el.createDiv({ cls: "synclo-summary-title", text: this.source.file.basename });
+      el.createDiv({ cls: "synclo-summary-title", text: fileName });
       el.createDiv({ cls: "synclo-summary-line", text: "Reading the note…" });
       return;
     }
