@@ -332,6 +332,12 @@
   opacity: 1;
 }
 
+/* A document's sections are tall: shown whole, on a plain ground. */
+.synclo-panel.is-document .synclo-fade {
+  object-fit: contain;
+  background-color: var(--background-secondary);
+}
+
 .synclo-sketch {
   position: absolute;
   inset: 0;
@@ -444,6 +450,10 @@
 }
 
 .synclo-panel-actions button {
+  width: 100%;
+}
+
+.synclo-panel-fix {
   width: 100%;
 }
 

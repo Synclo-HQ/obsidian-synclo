@@ -44,6 +44,10 @@ export const GIVE_UP_MS = 3 * 60 * 60 * 1000;
 /** Synclo's codes that end a job for good: the generation isn't there, or
  *  this account may no longer see it. Any other refusal is tried again. */
 const FINAL_CODES = new Set(["not_found", "forbidden"]);
+/** Said when a generation isn't there for this account any more. */
+export const NOT_FOUND_MESSAGE = "This presentation can't be found in your Synclo workspace any more.";
+/** Said when Synclo is still making a generation past its time. */
+export const TIMED_OUT_MESSAGE = "Synclo didn't finish this presentation. Try making it again.";
 const FIRST_BACKOFF_MS = 5_000;
 const MAX_BACKOFF_MS = 60_000;
 /** A check this old is abandoned when Obsidian comes back to the front. */
@@ -179,7 +183,7 @@ export class JobRunner {
             this.remove(id);
             this.deps.events.failed(job, {
               code: err.code ?? "rejected",
-              message: err.code === "not_found" ? "This presentation can't be found in your Synclo workspace any more." : messageFor(err),
+              message: err.code === "not_found" ? NOT_FOUND_MESSAGE : messageFor(err),
             });
             return;
           }
@@ -207,7 +211,7 @@ export class JobRunner {
         }
         if (overdue) {
           this.remove(id);
-          this.deps.events.failed(job, { code: "timed_out", message: "Synclo didn't finish this presentation. Try making it again." });
+          this.deps.events.failed(job, { code: "timed_out", message: TIMED_OUT_MESSAGE });
           return;
         }
         this.deps.events.progress(job, gen);

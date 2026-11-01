@@ -8,8 +8,10 @@ import { downloadName, fetchFile, freePath, withFileLink } from "./files";
 import type { SyncloHost } from "./host";
 import { parseJobs, unit, type PendingJob, type WorkspaceRef } from "./jobs/jobs";
 import { ProgressBoard } from "./jobs/progress-board";
-import { JobRunner } from "./jobs/runner";
+import { GIVE_UP_MS, JobRunner, type Timers } from "./jobs/runner";
 import { obsidianHttp } from "./obsidian/http";
+import { cardProgressInput } from "./panel/model";
+import { DeckWatch } from "./panel/watch";
 import { secretStore } from "./obsidian/secrets";
 import { DEFAULT_SETTINGS, parseSettings, type SyncloSettings } from "./settings";
 import { FindModal } from "./ui/find-modal";
@@ -34,6 +36,7 @@ const JOBS_KEY = "synclo-pending-jobs";
 /** The deck the Synclo panel shows (this vault's local storage). */
 const PANEL_KEY = "synclo-panel-deck";
 const ACCOUNT_FRESH_MS = 60_000;
+const timers: Timers = { set: (fn, ms) => window.setTimeout(fn, ms), clear: (id) => window.clearTimeout(id) };
 
 export default class SyncloPlugin extends Plugin implements SyncloHost {
   settings: SyncloSettings = { ...DEFAULT_SETTINGS };
@@ -50,6 +53,13 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
   private downloading = false;
   /** Pictures already uploaded, by file and version. */
   private uploaded = new Map<string, string>();
+  /** The deck each Synclo panel shows, asked about once for all of them. */
+  private watches = new Map<string, DeckWatch>();
+  /** Generations started, and found ready, while the plugin runs. */
+  private startedIds = new Set<string>();
+  private readyIds = new Set<string>();
+  /** The workspace last learned, to notice a change. */
+  private workspaceKey: string | null = null;
 
   async onload(): Promise<void> {
     this.settings = parseSettings(await this.loadData());
@@ -74,7 +84,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
         save: (jobs) => this.app.saveLocalStorage(JOBS_KEY, jobs.length ? jobs : null),
       },
       events: this.progress,
-      timers: { set: (fn, ms) => window.setTimeout(fn, ms), clear: (id) => window.clearTimeout(id) },
+      timers,
       now,
       base,
       isSignedIn: () => this.session.isSignedIn(),
@@ -95,9 +105,10 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
         // a workspace wait until the account says which (account() then
         // resumes them).
         this.runner.setWorkspace(null);
+        // The panel asks afresh: as the new sign-in, or to say it ended.
+        for (const watch of this.watches.values()) watch.restart();
         if (signedIn) {
           this.progress.signedIn();
-          this.eachPanel((view) => view.wake());
           this.runner.resumeAll();
         } else if (reason === "expired" && !this.runner.list().some((j) => j.base === this.base())) {
           // With presentations waiting, their notice says it instead.
@@ -138,6 +149,8 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
 
   onunload(): void {
     this.runner.stop();
+    for (const watch of this.watches.values()) watch.stop();
+    this.watches.clear();
     this.progress.clear();
   }
 
@@ -180,6 +193,10 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     try {
       const value = await this.api.account();
       this.accountCache = { value, at: Date.now() };
+      // Another workspace than before: the panel asks again in this one.
+      const key = value.workspaceId ?? value.workspace;
+      if (this.workspaceKey !== null && this.workspaceKey !== key) for (const watch of this.watches.values()) watch.restart();
+      this.workspaceKey = key;
       // Presentations made in this workspace are followed; others wait,
       // untouched, until theirs is connected.
       this.runner.setWorkspace(workspaceOf(value));
@@ -233,6 +250,36 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
   private setPanelTarget(job: PendingJob): void {
     this.app.saveLocalStorage(PANEL_KEY, job);
     this.eachPanel((view) => view.show(job));
+    // Only the deck the panels show is watched.
+    for (const [id, watch] of this.watches) {
+      if (id === job.generationId) continue;
+      watch.stop();
+      this.watches.delete(id);
+    }
+  }
+
+  deckWatch(target: PendingJob): DeckWatch {
+    let watch = this.watches.get(target.generationId);
+    if (!watch) {
+      watch = new DeckWatch(target, {
+        ask: (id) => this.api.cardState(id),
+        // Shared with the status bar; the board tells when it changed.
+        onCard: (id, card) => this.progressBoard.update(id, cardProgressInput(card)),
+        expired: (job) => this.givenUp(job),
+        signedIn: () => this.session.isSignedIn(),
+        timers,
+        now: () => Date.now(),
+      });
+      this.watches.set(target.generationId, watch);
+    }
+    return watch;
+  }
+
+  /** A deck past its time, or one the job runner no longer follows and
+   *  never found ready (it failed it, or gave up on it). */
+  private givenUp(job: PendingJob): boolean {
+    if (Date.now() - job.startedAt > GIVE_UP_MS) return true;
+    return !this.readyIds.has(job.generationId) && !this.runner.list().some((j) => j.generationId === job.generationId);
   }
 
   /** Every open Synclo panel that is loaded (a panel not loaded yet reads
@@ -254,10 +301,14 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
   }
 
   /** A Synclo panel is on screen now (not closed, not behind another tab,
-   *  not in a collapsed sidebar). */
+   *  not in a collapsed sidebar or a closed drawer). */
   private panelVisible(): boolean {
-    if (activeDocument.visibilityState !== "visible") return false;
-    return this.app.workspace.getLeavesOfType(PANEL_VIEW).some((leaf) => leaf.view instanceof SyncloPanelView && leaf.view.containerEl.isShown());
+    return this.app.workspace.getLeavesOfType(PANEL_VIEW).some((leaf) => leaf.view instanceof SyncloPanelView && leaf.view.visible());
+  }
+
+  /** A Synclo panel on screen shows this deck as ready, with its actions. */
+  private panelShowsReady(generationId: string): boolean {
+    return this.app.workspace.getLeavesOfType(PANEL_VIEW).some((leaf) => leaf.view instanceof SyncloPanelView && leaf.view.showsReady(generationId));
   }
 
   makeFromActiveNote(): void {
@@ -265,6 +316,14 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
   }
 
   startJob(job: PendingJob): void {
+    // A press found its first deck again, or an answer came late for a
+    // deck already followed: the same deck, told once.
+    if (this.startedIds.has(job.generationId) || this.runner.list().some((j) => j.generationId === job.generationId)) {
+      this.runner.kick();
+      if (!Platform.isMobile && this.panelTarget()?.generationId === job.generationId) void this.revealPanel();
+      return;
+    }
+    this.startedIds.add(job.generationId);
     const account = this.cachedAccount();
     if (account && !job.workspace) job.workspace = workspaceOf(account);
     // The panel follows the deck made last; on a computer Make opens it.
@@ -296,7 +355,17 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
 
   async onReady(job: PendingJob, gen: Generation): Promise<void> {
     const doc = gen.document;
+    const id = job.generationId;
     this.accountCache = null;
+    // The job runner's word reaches the panel at once, before anything is
+    // awaited (the board already says ready): its presentation; and it asks
+    // afresh for the finished deck's pictures.
+    this.readyIds.add(id);
+    const watch = this.watches.get(id);
+    if (watch) {
+      watch.setRunnerDocument(doc ? { id: doc.id, title: doc.title, slides: doc.slides, editUrl: doc.editUrl } : null);
+      watch.restart();
+    }
     if (!doc) {
       richNotice({ title: `“${job.title}” is ready`, line: "Open Synclo to see it." });
       return;
@@ -320,11 +389,10 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
       : file
         ? " The link couldn't be written into the note's properties; check that they are valid."
         : " The note was moved out of the vault or deleted, so the link wasn't written.";
-    this.eachPanel((view) => view.wake());
-    // The panel shows a ready deck itself; the notice is for when it can't
-    // be seen (closed, behind another tab, a collapsed sidebar, a phone),
-    // and for a link that couldn't be written.
-    if (!Platform.isMobile && linkWritten && this.panelVisible()) return;
+    // A panel on screen showing this deck ready says it itself; otherwise
+    // (closed, behind another tab, a collapsed sidebar, a closed drawer,
+    // another deck) and for a link that couldn't be written, the notice.
+    if (linkWritten && this.panelShowsReady(id)) return;
     richNotice({
       title: `“${doc.title}” is ready`,
       line: `${count}.${where}${credits}`,

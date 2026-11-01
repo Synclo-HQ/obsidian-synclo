@@ -16,8 +16,11 @@ export interface CardFrame {
   pic: string | null;
 }
 
+/** The finished deck's pictures, one per slide in order; a picture not
+ *  there is null in its place (never closed up, so a slide's picture
+ *  never moves onto another slide). */
 export type DeckPictures =
-  | { status: "ready"; pictures: string[] }
+  | { status: "ready"; pictures: Array<string | null> }
   | { status: "drawing"; pictures: Array<string | null> }
   | { status: "failed" };
 
@@ -46,6 +49,8 @@ export interface CardState {
   pictures: { made: number; total: number } | null;
   document: CardDocument | null;
   deck: DeckPictures | null;
+  /** Finished, but the presentation is no longer in the workspace. */
+  gone: boolean;
 }
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -74,7 +79,7 @@ export function parseCardState(x: Record<string, unknown>): CardState {
       : null;
   const k = isRecord(x.deck) ? x.deck : null;
   let deck: DeckPictures | null = null;
-  if (k?.status === "ready" && Array.isArray(k.pictures)) deck = { status: "ready", pictures: k.pictures.map((u) => url(u) ?? "").filter(Boolean) };
+  if (k?.status === "ready" && Array.isArray(k.pictures)) deck = { status: "ready", pictures: k.pictures.map((u) => url(u)) };
   else if (k?.status === "drawing" && Array.isArray(k.pictures)) deck = { status: "drawing", pictures: k.pictures.map((u) => url(u)) };
   else if (k?.status === "failed") deck = { status: "failed" };
   const e = isRecord(x.error) ? x.error : null;
@@ -89,5 +94,6 @@ export function parseCardState(x: Record<string, unknown>): CardState {
     pictures,
     document,
     deck,
+    gone: x.gone === true,
   };
 }

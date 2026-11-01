@@ -22,6 +22,9 @@ export interface McpDeps {
 export interface CallOptions {
   /** How long to wait for the answer. */
   timeoutMs?: number;
+  /** An answer that arrives after the wait was given up, read as a
+   *  successful tool result (a refusal or a broken answer is dropped). */
+  onLate?: (result: Record<string, unknown>) => void;
 }
 
 export class McpClient {
@@ -37,11 +40,21 @@ export class McpClient {
     if (utf8Length(body) > MAX_BODY_BYTES) throw new SyncloError("too-large", "This is too much to send to Synclo in one go (the limit is 1 MB). Try a shorter note, or a selection.");
     const timeoutMs = options.timeoutMs ?? 60_000;
 
+    const onLate = options.onLate;
+    const late = onLate
+      ? (res: HttpResponse) => {
+          try {
+            onLate(readAnswer(res, id, this.deps.now()));
+          } catch {
+            // Refused, or not an answer: nothing came of it.
+          }
+        }
+      : undefined;
     let token = await this.deps.session.accessToken();
-    let res = await this.post(body, token, timeoutMs);
+    let res = await this.post(body, token, timeoutMs, late);
     if (res.status === 401) {
       token = await this.deps.session.tokenAfterRejection(token);
-      res = await this.post(body, token, timeoutMs);
+      res = await this.post(body, token, timeoutMs, late);
       if (res.status === 401) {
         this.deps.session.forget("expired");
         throw new SyncloError("signed-out", MESSAGES.signInEnded);
@@ -80,9 +93,10 @@ export class McpClient {
     throw new SyncloError("rejected", description || "Synclo couldn't take this image.", { code });
   }
 
-  private async post(body: string, token: string, timeoutMs: number): Promise<HttpResponse> {
+  private async post(body: string, token: string, timeoutMs: number, late?: (res: HttpResponse) => void): Promise<HttpResponse> {
     try {
       return await this.deps.http({
+        ...(late ? { late } : {}),
         url: endpoints(this.deps.base()).mcp,
         method: "POST",
         contentType: "application/json",

@@ -1,9 +1,10 @@
 import { Modal, Notice, Setting, setIcon, type TFile } from "obsidian";
 import { SyncloError, isOutOfCredits, messageFor } from "../api/errors";
 import { utf8Length } from "../api/http";
-import type { Format, Mode } from "../api/synclo";
+import type { Format, Mode, Started } from "../api/synclo";
 import type { SyncloHost } from "../host";
 import { richNotice } from "./notices";
+import { newPressId, outcomeUnknown, parsePress, pressFor, requestKey, type Press } from "./press";
 import { unit } from "../jobs/jobs";
 import { LIMITS, buildMaterial, previewText, withPictures, type Material } from "../material/build";
 import { describeLeftOut } from "../material/left-out";
@@ -23,6 +24,8 @@ const CONTROL = "data-synclo-control";
 
 export const PRIVACY_LINE = "Only what's shown above is sent to Synclo, and only when you click Make. Nothing else in your vault is read.";
 const CREDITS_PER_SLIDE = 10;
+/** The press of Make whose outcome is unknown (this vault's local storage). */
+const PRESS_KEY = "synclo-press";
 
 export interface MakeSource {
   file: TFile;
@@ -523,15 +526,23 @@ export class MakeModal extends Modal {
   }
 
   private busyText: string | null = null;
-  /** One press of Make, named for Synclo: pressed again with the same
-   *  request (after an error), it's the same press; anything changed, or a
-   *  new window, is a new press and a new deck. */
-  private press: { id: string; request: string } | null = null;
 
-  private pressId(request: Record<string, unknown>): string {
-    const key = JSON.stringify(request);
-    if (!this.press || this.press.request !== key) this.press = { id: newPressId(), request: key };
-    return this.press.id;
+  /** This press of Make, named for Synclo: the one kept, if Make was
+   *  pressed for this note with the same request less than ten minutes ago
+   *  and its outcome is unknown (press.ts); else a new one, kept until the
+   *  answer. `fresh` always makes a new one. */
+  private press(request: Record<string, unknown>, fresh = false): Press {
+    const key = requestKey({ base: this.host.base(), ...request });
+    const kept = fresh ? null : parsePress(this.host.app.loadLocalStorage(PRESS_KEY));
+    const press = pressFor(kept, this.source.file.path, key, Date.now(), newPressId);
+    this.host.app.saveLocalStorage(PRESS_KEY, press);
+    return press;
+  }
+
+  /** The press was answered: the next one is new. */
+  private pressAnswered(press: Press): void {
+    const kept = parsePress(this.host.app.loadLocalStorage(PRESS_KEY));
+    if (kept?.id === press.id) this.host.app.saveLocalStorage(PRESS_KEY, null);
   }
 
   private setBusy(text: string | null): void {
@@ -601,12 +612,38 @@ export class MakeModal extends Modal {
         language: c.language || undefined,
         instructions: c.instructions || undefined,
       };
-      const started = await this.host.api.create({ ...request, request_id: this.pressId(request) });
-      const already = this.host.runner.list().some((j) => j.generationId === started.generationId);
-      this.host.startJob({ generationId: started.generationId, notePath: this.source.file.path, title: m.title, format: c.format, base: this.host.base(), startedAt: Date.now() });
+      const notePath = this.source.file.path;
+      const base = this.host.base();
+      const start = (s: Started) => this.host.startJob({ generationId: s.generationId, notePath, title: m.title, format: c.format, base, startedAt: Date.now() });
+      let press = this.press(request);
+      // An answer that comes after the wait was given up started the deck
+      // all the same: it is followed (once), and a window still showing the
+      // failure closes.
+      const late = (pressed: Press) => (s: Started) => {
+        this.pressAnswered(pressed);
+        start(s);
+        if (!this.closed && !this.busy) this.close();
+      };
+      let started: Started;
+      try {
+        try {
+          started = await this.host.api.create({ ...request, request_id: press.id }, late(press));
+        } catch (err) {
+          // That name was already used for another request: a new press.
+          if (!(err instanceof SyncloError && err.code === "idempotency_conflict")) throw err;
+          press = this.press(request, true);
+          started = await this.host.api.create({ ...request, request_id: press.id }, late(press));
+        }
+      } catch (err) {
+        // Kept only if the press may have reached Synclo.
+        if (!outcomeUnknown(err)) this.pressAnswered(press);
+        throw err;
+      }
+      this.pressAnswered(press);
+      // Followed once, even when this press found a deck already followed.
+      start(started);
       this.busy = false;
       this.close();
-      if (already) this.host.runner.kick();
       if (skipped) new Notice(`${skipped} of the note's images couldn't be sent, so Synclo is making it without them.`);
     } catch (err) {
       this.busy = false;
@@ -642,9 +679,3 @@ function named<T>(el: HTMLElement, name: string, component: T): T {
   return component;
 }
 
-/** 32 random letters and digits (crypto.randomUUID isn't on every phone). */
-function newPressId(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}

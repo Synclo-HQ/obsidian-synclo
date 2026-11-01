@@ -1,5 +1,6 @@
 import { webcrypto } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { NetworkError } from "../src/api/http";
 import { McpClient } from "../src/api/mcp";
 import { SyncloApi, documentIdOf, parseGeneration } from "../src/api/synclo";
 import { SECRET_TOKENS, Session } from "../src/auth/session";
@@ -123,6 +124,35 @@ describe("generations", () => {
     expect((await api.generation("gen_1", 30)).status).toBe("queued");
     await api.generation("gen_1", 30);
     expect(requests.map((r) => "wait_seconds" in argsOf(r))).toEqual([true, false, false]);
+  });
+
+  it("names a press for Synclo, and starts it without the name when a server refuses it", async () => {
+    const { api, requests } = client((req) => {
+      const args = argsOf(req);
+      if ("request_id" in args) return { status: 200, body: { jsonrpc: "2.0", id: 1, error: { code: -32602, message: 'Invalid arguments for create_presentation: unknown argument "request_id".' } } };
+      return rpcResult({ generation_id: "gen_2", status: "queued" });
+    });
+    expect((await api.create({ input: "brief", mode: "generate", format: "slides", request_id: "p1" })).generationId).toBe("gen_2");
+    await api.create({ input: "brief", mode: "generate", format: "slides", request_id: "p2" });
+    expect(requests.map((r) => argsOf(r).request_id ?? null)).toEqual(["p1", null, null]);
+  });
+
+  it("hands on a deck started by an answer that came after the wait", async () => {
+    const { http } = fakeHttp(() => rpcResult({ generation_id: "gen_3", status: "queued" }));
+    // The wait is given up; the answer comes after.
+    const lateHttp: typeof http = async (req) => {
+      const res = await http(req);
+      setTimeout(() => req.late?.(res), 0);
+      throw new NetworkError("timed out", true);
+    };
+    const secrets = memorySecrets();
+    secrets.set(SECRET_TOKENS, JSON.stringify({ v: 1, base: BASE, access: "syo_1", refresh: "syr_1", expiresAt: 9_999_999_999_999, scope: "" }));
+    const session = new Session({ http: lateHttp, secrets, local: memoryLocal(), crypto: webcrypto as unknown as Crypto, now: () => 0, base: () => BASE });
+    const api = new SyncloApi(new McpClient({ http: lateHttp, session, base: () => BASE, now: () => 0 }));
+    const late: string[] = [];
+    await expect(api.create({ input: "brief", mode: "generate", format: "slides", request_id: "p1" }, (s) => late.push(s.generationId))).rejects.toMatchObject({ kind: "network" });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(late).toEqual(["gen_3"]);
   });
 
   it("reads a finished generation", () => {

@@ -1,10 +1,10 @@
 import { ItemView, setIcon, type WorkspaceLeaf } from "obsidian";
-import type { CardState } from "../api/card";
+import { MESSAGES } from "../api/errors";
 import type { SyncloHost } from "../host";
-import { progressWords, unit, type PendingJob } from "../jobs/jobs";
-import { progressInputOf } from "../jobs/jobs";
-import { cardProgressInput, changedSlide, heroSlide, imageKey, panelSlides, shareOf, type PanelSlide } from "../panel/model";
-import { CardPoller } from "../panel/poller";
+import { progressInputOf, progressWords, unit, type PendingJob } from "../jobs/jobs";
+import { NOT_FOUND_MESSAGE } from "../jobs/runner";
+import { cardProgressInput, heroSlide, shareOf } from "../panel/model";
+import type { DeckWatch, RunnerDocument } from "../panel/watch";
 
 export const PANEL_VIEW = "synclo-panel";
 
@@ -13,11 +13,18 @@ export function noteNameOf(path: string): string {
   return (path.split("/").pop() ?? path).replace(/\.md$/i, "");
 }
 
-/** Two stacked pictures, so one fades into the next. */
+/** Two stacked pictures, so one fades into the next, over the slide's
+ *  sketch, which stays until a picture has loaded. */
 interface Fader {
   a: HTMLImageElement;
   b: HTMLImageElement;
+  /** The address wanted. */
   shown: string | null;
+  /** The picture loading it. */
+  loading: HTMLImageElement | null;
+  sketch: HTMLElement;
+  /** The sketch is wanted while no picture is on. */
+  wantSketch: boolean;
 }
 
 interface Frame {
@@ -25,7 +32,6 @@ interface Frame {
   fader: Fader;
   sketchNo: HTMLElement;
   sketchTitle: HTMLElement;
-  sketch: HTMLElement;
 }
 
 interface Parts {
@@ -35,38 +41,51 @@ interface Parts {
   bar: HTMLElement;
   hero: HTMLElement;
   heroFader: Fader;
-  heroSketch: HTMLElement;
   heroNo: HTMLElement;
   heroTitle: HTMLElement;
   heroMsg: HTMLElement;
   prev: HTMLButtonElement;
   next: HTMLButtonElement;
   cap: HTMLElement;
+  fix: HTMLButtonElement;
   actions: HTMLElement;
   meta: HTMLElement;
   grid: HTMLElement;
   frames: Frame[];
 }
 
+/** Said in place of where it stands when there is no more to follow, with
+ *  what the person can do about it. */
+interface Final {
+  message: string;
+  action: { label: string; run: () => void } | null;
+  /** The action is to connect again (a sign-in is got ready for it). */
+  connect?: boolean;
+}
+
+const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
 /**
  * The Synclo panel: the deck being made, as it arrives. The plan, then
  * each slide as it is written (the slide that changed last, large), then
  * its images; once ready, the whole deck to look through, with Open and
  * the downloads. It only shows: the job runner writes the link into the
- * note and says when it is ready or failed.
+ * note and says when it is ready or failed. What it shows comes from the
+ * plugin's watch on the deck, shared by every panel showing it.
  */
 export class SyncloPanelView extends ItemView {
   private target: PendingJob | null = null;
-  private poller: CardPoller | null = null;
-  private card: CardState | null = null;
-  private slides: PanelSlide[] = [];
-  private lastChanged: number | null = null;
+  private watch: DeckWatch | null = null;
+  private unwatch: (() => void) | null = null;
   private picked: number | null = null;
-  /** Each picture's first address (kept, so a fresh signature never
-   *  reloads it) and its latest (used if the first one expires). */
-  private firstAddress = new Map<string, string>();
-  private latestAddress = new Map<string, string>();
   private parts: Parts | null = null;
+  /** The deck drawn as ready, with its actions; null otherwise. */
+  private drawnReady: string | null = null;
+  /** The deck is finished (as last drawn). */
+  private finished = false;
+  private fixRun: (() => void) | null = null;
+  /** A sign-in was got ready for the Connect shown. */
+  private connectReady = false;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -89,10 +108,12 @@ export class SyncloPanelView extends ItemView {
 
   async onOpen(): Promise<void> {
     this.contentEl.addClass("synclo-panel");
-    // Asked only while it can be seen: again as soon as it can.
-    this.registerDomEvent(document, "visibilitychange", () => this.wake());
+    // Asked only while it can be seen: again as soon as it can (in a
+    // window of its own, that window's document says).
+    this.registerDomEvent(this.containerEl.doc, "visibilitychange", () => this.wake());
     this.registerEvent(this.app.workspace.on("layout-change", () => this.wake()));
     this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.wake()));
+    this.registerEvent(this.app.workspace.on("resize", () => this.wake()));
     // Where it stands follows the newest answer, the job runner's too.
     this.register(
       this.host.progressBoard.onChange((id) => {
@@ -109,8 +130,9 @@ export class SyncloPanelView extends ItemView {
   }
 
   async onClose(): Promise<void> {
-    this.poller?.stop();
-    this.poller = null;
+    this.unwatch?.();
+    this.unwatch = null;
+    this.watch = null;
   }
 
   onResize(): void {
@@ -119,7 +141,22 @@ export class SyncloPanelView extends ItemView {
 
   /** Asks Synclo again now, if the panel is following a deck. */
   wake(): void {
-    this.poller?.wake();
+    this.watch?.wake();
+  }
+
+  /** On screen: its window in front, the panel not behind another tab, its
+   *  sidebar not collapsed, its drawer not closed. */
+  visible(): boolean {
+    if (this.containerEl.doc.visibilityState !== "visible" || !this.containerEl.isShown()) return false;
+    const root = this.leaf.getRoot();
+    const { leftSplit, rightSplit } = this.app.workspace;
+    for (const side of [leftSplit, rightSplit]) if (root === side && side.collapsed) return false;
+    return true;
+  }
+
+  /** On screen, showing this deck as ready with its actions. */
+  showsReady(generationId: string): boolean {
+    return this.drawnReady === generationId && this.target?.generationId === generationId && this.visible();
   }
 
   /** Shows a deck: a new Make starts it from the beginning; the same deck
@@ -131,47 +168,18 @@ export class SyncloPanelView extends ItemView {
       this.wake();
       return;
     }
-    this.poller?.stop();
-    this.poller = null;
+    this.unwatch?.();
+    this.unwatch = null;
+    this.watch = null;
     this.target = target;
-    this.card = null;
-    this.slides = [];
-    this.lastChanged = null;
     this.picked = null;
-    this.firstAddress.clear();
-    this.latestAddress.clear();
+    this.drawnReady = null;
     this.build();
     if (!target) return;
-    this.poller = new CardPoller({
-      ask: () => this.host.api.cardState(target.generationId),
-      onAnswer: (card) => this.answer(card),
-      visible: () => activeDocument.visibilityState === "visible" && this.containerEl.isShown(),
-      timers: { set: (fn, ms) => window.setTimeout(fn, ms), clear: (id) => window.clearTimeout(id) },
-    });
-    this.poller.wake();
-  }
-
-  private answer(card: CardState): void {
-    const slides = panelSlides(card);
-    for (const s of slides) {
-      if (!s.image) continue;
-      const key = imageKey(s.image);
-      this.latestAddress.set(key, s.image);
-      if (!this.firstAddress.has(key)) this.firstAddress.set(key, s.image);
-    }
-    const changed = changedSlide(this.slides, slides);
-    if (changed !== null) this.lastChanged = changed;
-    this.card = card;
-    this.slides = slides;
-    // Shared with the status bar; the board tells when it changed. Drawn
-    // here too, for the slides even when where it stands is unchanged.
-    if (this.target) this.host.progressBoard.update(this.target.generationId, cardProgressInput(card));
+    const watch = this.host.deckWatch(target);
+    this.watch = watch;
+    this.unwatch = watch.subscribe({ changed: () => this.render(), visible: () => this.visible() });
     this.render();
-  }
-
-  /** The address to show for a picture: the first one seen for it. */
-  private address(image: string | null): string | null {
-    return image ? (this.firstAddress.get(imageKey(image)) ?? image) : null;
   }
 
   /* ── Drawing ─────────────────────────────────────────────────────────── */
@@ -190,7 +198,7 @@ export class SyncloPanelView extends ItemView {
     const body = root.createDiv({ cls: "synclo-panel-body" });
     const from = body.createDiv({ cls: "synclo-panel-from" });
     const title = body.createDiv({ cls: "synclo-panel-title" });
-    const status = body.createDiv({ cls: "synclo-panel-status" });
+    const status = body.createDiv({ cls: "synclo-panel-status", attr: { "aria-live": "polite" } });
     const bar = body.createDiv({ cls: "synclo-panel-bar" });
     bar.createEl("i");
 
@@ -198,22 +206,37 @@ export class SyncloPanelView extends ItemView {
     const heroSketch = hero.createDiv({ cls: "synclo-sketch" });
     const heroNo = heroSketch.createDiv({ cls: "synclo-sketch-no" });
     const heroTitle = heroSketch.createDiv({ cls: "synclo-sketch-title" });
-    const heroFader = this.fader(hero);
+    const heroFader = this.fader(hero, heroSketch);
     const heroMsg = hero.createDiv({ cls: "synclo-panel-msg" });
-    const prev = hero.createEl("button", { cls: "synclo-panel-nav is-prev", attr: { "aria-label": "Previous slide", type: "button" } });
+    const prev = hero.createEl("button", { cls: "synclo-panel-nav is-prev", attr: { type: "button" } });
     setIcon(prev, "chevron-left");
-    const next = hero.createEl("button", { cls: "synclo-panel-nav is-next", attr: { "aria-label": "Next slide", type: "button" } });
+    const next = hero.createEl("button", { cls: "synclo-panel-nav is-next", attr: { type: "button" } });
     setIcon(next, "chevron-right");
-    prev.addEventListener("click", () => this.step(-1));
-    next.addEventListener("click", () => this.step(1));
+    prev.addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      this.step(-1);
+    });
+    next.addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      this.step(1);
+    });
+    // While it is made, the large frame (like the latest slide) goes back
+    // to following the slide that changed last.
+    hero.addEventListener("click", () => {
+      if (this.finished || this.picked === null) return;
+      this.picked = null;
+      this.render();
+    });
 
     const cap = body.createDiv({ cls: "synclo-panel-cap" });
+    const fix = body.createEl("button", { cls: "mod-cta synclo-panel-fix" });
+    fix.addEventListener("click", () => this.fixRun?.());
     const actions = body.createDiv({ cls: "synclo-panel-actions" });
     const open = actions.createEl("button", { cls: "mod-cta", text: "Open in Synclo" });
     const pptx = actions.createEl("button", { text: "Download PowerPoint" });
     const pdf = actions.createEl("button", { text: "Download PDF" });
     open.addEventListener("click", () => {
-      const doc = this.card?.document;
+      const doc = this.presentation();
       if (doc) this.host.openExternal(doc.editUrl);
     });
     pptx.addEventListener("click", () => this.download("pptx"));
@@ -221,74 +244,120 @@ export class SyncloPanelView extends ItemView {
     const meta = body.createDiv({ cls: "synclo-panel-meta" });
     const grid = body.createDiv({ cls: "synclo-panel-grid" });
 
-    this.parts = { from, title, status, bar, hero, heroFader, heroSketch, heroNo, heroTitle, heroMsg, prev, next, cap, actions, meta, grid, frames: [] };
+    this.parts = { from, title, status, bar, hero, heroFader, heroNo, heroTitle, heroMsg, prev, next, cap, fix, actions, meta, grid, frames: [] };
     this.render();
   }
 
-  private fader(parent: HTMLElement): Fader {
+  private fader(parent: HTMLElement, sketch: HTMLElement): Fader {
     const a = parent.createEl("img", { cls: "synclo-fade", attr: { alt: "" } });
     const b = parent.createEl("img", { cls: "synclo-fade", attr: { alt: "" } });
-    const fader: Fader = { a, b, shown: null };
+    const f: Fader = { a, b, shown: null, loading: null, sketch, wantSketch: false };
     for (const img of [a, b]) {
+      const other = img === a ? b : a;
+      // Shown once it has loaded (the sketch stays until then).
+      img.addEventListener("load", () => {
+        if (f.loading !== img) return;
+        f.loading = null;
+        img.addClass("is-on");
+        other.removeClass("is-on");
+        this.syncSketch(f);
+      });
       // An address past its hour: the latest one for the same picture.
       img.addEventListener("error", () => {
         const src = img.getAttribute("src");
-        if (!src) return;
-        const latest = this.latestAddress.get(imageKey(src));
-        if (latest && latest !== src) {
-          this.firstAddress.set(imageKey(src), latest);
-          img.setAttribute("src", latest);
-        }
+        const latest = src ? this.watch?.fresher(src) : null;
+        if (!src || !latest) return;
+        if (f.shown === src) f.shown = latest;
+        img.setAttribute("src", latest);
       });
     }
-    return fader;
+    return f;
   }
 
-  /** Shows `address` in a fader, fading from what it showed. */
+  /** Shows `address` in a fader, fading from what it showed once it has
+   *  loaded. */
   private fade(f: Fader, address: string | null): void {
-    if (f.shown === address) return;
-    f.shown = address;
-    if (!address) {
-      f.a.removeClass("is-on");
-      f.b.removeClass("is-on");
-      return;
+    if (f.shown !== address) {
+      f.shown = address;
+      if (!address) {
+        f.loading = null;
+        f.a.removeClass("is-on");
+        f.b.removeClass("is-on");
+      } else {
+        const off = f.a.hasClass("is-on") ? f.b : f.a;
+        f.loading = off;
+        off.setAttribute("src", address);
+      }
     }
-    const on = f.a.hasClass("is-on") ? f.a : f.b;
-    const off = on === f.a ? f.b : f.a;
-    const show = () => {
-      if (f.shown !== address) return;
-      off.addClass("is-on");
-      on.removeClass("is-on");
-    };
-    off.addEventListener("load", show, { once: true });
-    off.setAttribute("src", address);
+    this.syncSketch(f);
+  }
+
+  private syncSketch(f: Fader): void {
+    f.sketch.toggle(f.wantSketch && !(f.a.hasClass("is-on") || f.b.hasClass("is-on")));
   }
 
   private step(by: number): void {
-    const n = this.slides.length;
+    const slides = this.watch?.slides ?? [];
+    const n = slides.length;
     if (!n) return;
-    const at = heroSlide(this.slides, this.lastChanged, this.picked, true) ?? 0;
+    const at = heroSlide(slides, this.watch?.lastChanged ?? null, this.picked, true) ?? 0;
     this.picked = (at + by + n) % n;
     this.render();
   }
 
+  /** The presentation once there is one: from the panel's answer, else
+   *  from the job runner's; none once it isn't in the workspace. */
+  private presentation(): RunnerDocument | null {
+    const w = this.watch;
+    if (!w || w.card?.gone || w.stopped?.reason === "gone") return null;
+    return w.card?.document ?? w.runnerDocument;
+  }
+
   private download(format: "pptx" | "pdf"): void {
-    const doc = this.card?.document;
+    const doc = this.presentation();
     if (!doc || !this.target) return;
     const note = this.app.vault.getFileByPath(this.target.notePath);
     void this.host.download(doc.id, format, note, doc.title);
+  }
+
+  /** What to say once there is no more to follow, if that is so. */
+  private final(): Final | null {
+    const w = this.watch;
+    const card = w?.card ?? null;
+    if (card?.gone || w?.stopped?.reason === "gone") return { message: NOT_FOUND_MESSAGE, action: null };
+    if (card?.status === "failed") {
+      if (card.error?.code === "insufficient_credits") {
+        return { message: MESSAGES.outOfCredits, action: { label: "Get more credits", run: () => this.host.openExternal(this.host.creditsUrl()) } };
+      }
+      return { message: card.error?.message || "The presentation couldn't be made.", action: null };
+    }
+    const stopped = w?.stopped;
+    if (!stopped) return null;
+    if (stopped.reason === "signed-out") return { message: MESSAGES.signedOut, action: { label: "Connect", run: () => void this.host.connect() }, connect: true };
+    if (stopped.reason === "scope") return { message: stopped.error.message, action: { label: "Connect again", run: () => void this.host.connect() }, connect: true };
+    return { message: stopped.error.message, action: null };
   }
 
   private render(): void {
     const p = this.parts;
     const target = this.target;
     if (!p || !target) return;
-    const card = this.card;
+    const w = this.watch;
+    const card = w?.card ?? null;
+    const slides = w?.slides ?? [];
     const name = noteNameOf(target.notePath);
     const format = card?.format ?? target.format;
-    const ready = card?.status === "completed";
-    const failed = card?.status === "failed";
-    const slides = this.slides;
+    const one = capital(unit(format, 1));
+
+    // Where it stands: the newest answer, this panel's or the job runner's
+    // (the status bar reads the same).
+    const progress = this.host.progressBoard.get(target.generationId) ?? (card ? cardProgressInput(card) : progressInputOf(null));
+    const words = progressWords(progress, format, name, false);
+    const final = this.final();
+    const doc = this.presentation();
+    // Finished when either answer says so.
+    const done = card?.status === "completed" || progress.status === "completed";
+    this.finished = done;
 
     // The deck's own colors on its sketches, once Synclo has chosen them.
     this.contentEl.setCssProps({
@@ -296,51 +365,58 @@ export class SyncloPanelView extends ItemView {
       "--synclo-sketch-ink": card?.colors?.heading ?? "",
     });
     this.contentEl.toggleClass("has-colors", !!card?.colors);
+    // A document's sections are shown whole, not cropped to a slide.
+    this.contentEl.toggleClass("is-document", format === "document");
 
     p.from.setText(`From “${name}”`);
-    p.title.setText(card && card.frames.length ? (card.title ?? card.document?.title ?? name) : name);
+    const named = !!card && (card.frames.length > 0 || !!card.document);
+    p.title.setText(named ? (card?.title ?? card?.document?.title ?? name) : (w?.runnerDocument?.title ?? name));
 
-    // Where it stands: the newest answer, this panel's or the job runner's
-    // (the status bar reads the same).
-    const progress = this.host.progressBoard.get(target.generationId) ?? (card ? cardProgressInput(card) : progressInputOf(null));
-    const words = progressWords(progress, format, name, false);
-    const done = ready || progress.status === "completed";
-    const statusLine = failed ? (card?.error?.message ?? "") : words.line;
+    const statusLine = final ? final.message : done ? "" : words.line;
     p.status.setText(statusLine);
-    p.status.toggle(!done && !!statusLine);
+    p.status.toggle(!!statusLine);
 
     const share = shareOf(progress);
-    p.bar.toggle(!done && !failed);
+    p.bar.toggle(!done && !final);
     p.bar.toggleClass("is-waiting", share === null);
     p.bar.setCssProps({ "--synclo-progress": share === null ? "" : `${Math.round(share * 100)}%` });
 
     // The large frame: the slide that changed last (or the one picked).
-    const at = heroSlide(slides, this.lastChanged, this.picked, ready);
+    const at = heroSlide(slides, w?.lastChanged ?? null, this.picked, done);
     const shown = at !== null ? slides[at] : undefined;
-    const image = this.address(shown?.image ?? null);
-    this.fade(p.heroFader, image);
-    p.heroSketch.toggle(!!shown && !image);
+    p.heroFader.wantSketch = !!shown;
+    this.fade(p.heroFader, w?.address(shown?.image ?? null) ?? null);
     if (shown) {
       p.heroNo.setText(String((at ?? 0) + 1).padStart(2, "0"));
       p.heroTitle.setText(shown.title);
     }
-    // Before the plan: where it stands, in the frame.
+    // Before the plan: where it stands, in the frame (or why it ended).
     p.heroMsg.empty();
     p.heroMsg.toggle(!slides.length);
     if (!slides.length) {
-      p.heroMsg.createSpan({ text: failed ? "" : words.line });
-      if (!failed) p.heroMsg.createDiv({ cls: "synclo-shimmer" });
+      p.heroMsg.createSpan({ text: final ? final.message : done ? "" : words.line });
+      if (!final && !done) p.heroMsg.createDiv({ cls: "synclo-shimmer" });
     }
-    p.prev.toggle(ready && slides.length > 1);
-    p.next.toggle(ready && slides.length > 1);
-    p.cap.setText(shown ? `Slide ${(at ?? 0) + 1} · ${shown.title}` : "");
+    p.prev.setAttribute("aria-label", `Previous ${unit(format, 1)}`);
+    p.next.setAttribute("aria-label", `Next ${unit(format, 1)}`);
+    p.prev.toggle(done && slides.length > 1);
+    p.next.toggle(done && slides.length > 1);
+    p.cap.setText(shown ? `${one} ${(at ?? 0) + 1} · ${shown.title}` : "");
 
-    const doc = card?.document ?? null;
-    p.actions.toggle(ready && !!doc);
+    // A Connect shown opens the sign-in in the same moment as the click.
+    if (final?.connect && !this.connectReady) this.host.prepareConnect();
+    this.connectReady = !!final?.connect;
+    this.fixRun = final?.action?.run ?? null;
+    p.fix.setText(final?.action?.label ?? "");
+    p.fix.toggle(!!final?.action);
+
+    const showActions = done && !!doc;
+    p.actions.toggle(showActions);
+    this.drawnReady = showActions ? target.generationId : null;
     const count = doc?.slides || slides.length;
     const note = this.app.vault.getFileByPath(target.notePath);
     const linked = !!doc && !!note && this.host.noteDocumentId(note) === doc.id;
-    p.meta.toggle(ready && count > 0);
+    p.meta.toggle(showActions && count > 0);
     p.meta.setText(`${count} ${unit(format, count)}.${linked ? " The link is in the note's properties." : ""}`);
 
     // Every slide: its sketch until it is drawn, then its picture.
@@ -350,19 +426,21 @@ export class SyncloPanelView extends ItemView {
     slides.forEach((s, i) => {
       const f = p.frames[i];
       if (!f) return;
-      const pic = this.address(s.image);
+      const pic = w?.address(s.image) ?? null;
+      f.fader.wantSketch = true;
       this.fade(f.fader, pic);
       f.el.toggleClass("has-picture", !!pic);
+      const selected = !!pic && i === at && (done || this.picked !== null);
       // A drawn slide can be picked, by pointer or by keyboard.
       if (pic) {
         f.el.setAttribute("role", "button");
         f.el.setAttribute("tabindex", "0");
+        f.el.setAttribute("aria-label", `${one} ${i + 1}: ${s.title}`);
+        f.el.setAttribute("aria-pressed", String(selected));
       } else {
-        f.el.removeAttribute("role");
-        f.el.removeAttribute("tabindex");
+        for (const attr of ["role", "tabindex", "aria-label", "aria-pressed"]) f.el.removeAttribute(attr);
       }
-      f.el.toggleClass("is-selected", !!pic && i === at && (ready || this.picked !== null));
-      f.sketch.toggle(!pic);
+      f.el.toggleClass("is-selected", selected);
       f.sketchNo.setText(String(i + 1).padStart(2, "0"));
       f.sketchTitle.setText(s.title);
     });
@@ -373,10 +451,11 @@ export class SyncloPanelView extends ItemView {
     const sketch = el.createDiv({ cls: "synclo-sketch" });
     const sketchNo = sketch.createDiv({ cls: "synclo-sketch-no" });
     const sketchTitle = sketch.createDiv({ cls: "synclo-sketch-title" });
-    const fader = this.fader(el);
+    const fader = this.fader(el, sketch);
     const pick = () => {
       if (!el.hasClass("has-picture")) return;
-      this.picked = i;
+      // While it is made, the latest slide picked again follows it live.
+      this.picked = !this.finished && i === this.watch?.lastChanged ? null : i;
       this.render();
     };
     el.addEventListener("click", pick);
@@ -385,6 +464,6 @@ export class SyncloPanelView extends ItemView {
       evt.preventDefault();
       pick();
     });
-    return { el, fader, sketch, sketchNo, sketchTitle };
+    return { el, fader, sketchNo, sketchTitle };
   }
 }

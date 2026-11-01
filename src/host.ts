@@ -5,6 +5,7 @@ import type { Session } from "./auth/session";
 import type { PendingJob } from "./jobs/jobs";
 import type { ProgressBoard } from "./jobs/progress-board";
 import type { JobRunner } from "./jobs/runner";
+import type { DeckWatch } from "./panel/watch";
 import type { SyncloSettings } from "./settings";
 
 /** What the windows and notices need from the plugin. */
@@ -49,6 +50,9 @@ export interface SyncloHost {
   onReady(job: PendingJob, gen: Generation): Promise<void>;
   /** The deck the Synclo panel shows: the one made last in this vault. */
   panelTarget(): PendingJob | null;
+  /** The deck as the Synclo panels see it, asked about once for all of
+   *  them. */
+  deckWatch(target: PendingJob): DeckWatch;
   /** Opens the Synclo panel (or brings it forward). */
   revealPanel(): Promise<void>;
   /** Opens the make window for the note in front. */

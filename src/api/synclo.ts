@@ -144,6 +144,9 @@ export class SyncloApi {
   /** get_generation takes wait_seconds only from this plugin's connection;
    *  an older server that refuses it is asked without. */
   private waitRefused = false;
+  /** create_presentation takes request_id only from this plugin's
+   *  connection; a server that refuses it is asked without. */
+  private requestIdRefused = false;
 
   constructor(private readonly mcp: McpClient) {}
 
@@ -167,17 +170,44 @@ export class SyncloApi {
     return list.filter(isRecord).flatMap((t) => (typeof t.id === "string" && t.id ? [{ id: t.id, name: str(t.name, t.id), kind: str(t.kind), description: str(t.description) }] : []));
   }
 
-  async create(args: CreateArgs): Promise<Started> {
+  /** Starts a deck. `onLate`: the deck Synclo started after the wait for
+   *  its answer was given up. */
+  async create(args: CreateArgs, onLate?: (started: Started) => void): Promise<Started> {
     const clean: Record<string, unknown> = { input: args.input, mode: args.mode, format: args.format };
     if (args.slides) clean.slides = args.slides;
     if (args.theme) clean.theme = args.theme;
     if (args.image_style) clean.image_style = args.image_style;
     if (args.language?.trim()) clean.language = args.language.trim().slice(0, 60);
     if (args.instructions?.trim()) clean.instructions = args.instructions.trim().slice(0, 2000);
-    if (args.request_id) clean.request_id = args.request_id;
-    const r = await this.mcp.call("create_presentation", clean, { timeoutMs: 90_000 });
-    if (typeof r.generation_id !== "string") throw malformed("no generation id");
-    return { generationId: r.generation_id, status: parseStatus(r.status), creditsEstimated: num(r.credits_estimated) };
+    const started = (r: Record<string, unknown>): Started => {
+      if (typeof r.generation_id !== "string") throw malformed("no generation id");
+      return { generationId: r.generation_id, status: parseStatus(r.status), creditsEstimated: num(r.credits_estimated) };
+    };
+    // An answer that comes after the wait was given up still started a
+    // deck: it is handed on, never dropped.
+    const options = {
+      timeoutMs: 90_000,
+      ...(onLate
+        ? {
+            onLate: (r: Record<string, unknown>) => {
+              try {
+                onLate(started(r));
+              } catch {
+                // No generation in it.
+              }
+            },
+          }
+        : {}),
+    };
+    if (args.request_id && !this.requestIdRefused) {
+      try {
+        return started(await this.mcp.call("create_presentation", { ...clean, request_id: args.request_id }, options));
+      } catch (err) {
+        if (!(err instanceof SyncloError && err.code === "invalid_arguments" && /request_id/.test(err.message))) throw err;
+        this.requestIdRefused = true;
+      }
+    }
+    return started(await this.mcp.call("create_presentation", clean, options));
   }
 
   /** A generation's state, waiting on Synclo's side up to `waitSeconds`

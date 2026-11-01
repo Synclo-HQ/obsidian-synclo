@@ -15,18 +15,31 @@ export interface PanelSlide {
 }
 
 /** The slides as the panel draws them. While the deck is made, each
- *  slide's drawing as it is written; once ready, the finished deck's
- *  pictures (with its images) replace them, slide by slide as they come. */
+ *  slide's drawing as it is written. Once the presentation exists, its own
+ *  count and titles, with the finished deck's pictures (which have its
+ *  images) as they come; a drawing made while writing stands in only when
+ *  it is plainly the same slide (same place, same title), so a title is
+ *  never paired with another slide's picture. */
 export function panelSlides(card: CardState): PanelSlide[] {
-  const titles = card.document?.titles.length ? card.document.titles : card.frames.map((f) => f.title);
   const finished = card.deck && card.deck.status !== "failed" ? card.deck.pictures : [];
-  const count = Math.max(titles.length, card.frames.length);
-  const slides: PanelSlide[] = [];
-  for (let i = 0; i < count; i++) {
-    const title = titles[i] || card.frames[i]?.title || "";
-    slides.push({ title, image: finished[i] || card.frames[i]?.pic || null });
+  const doc = card.document;
+  if (doc) {
+    const count = doc.slides > 0 ? doc.slides : doc.titles.length;
+    const slides: PanelSlide[] = [];
+    for (let i = 0; i < count; i++) {
+      const title = doc.titles[i] ?? "";
+      const frame = card.frames[i];
+      const drawing = frame?.pic && sameTitle(frame.title, title) ? frame.pic : null;
+      slides.push({ title, image: finished[i] ?? drawing ?? null });
+    }
+    return slides;
   }
-  return slides;
+  return card.frames.map((f) => ({ title: f.title, image: f.pic }));
+}
+
+function sameTitle(a: string, b: string): boolean {
+  const key = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
+  return key(a) === key(b);
 }
 
 /** A picture's address without its signature: Synclo signs the same
@@ -96,13 +109,34 @@ export function shareOf(input: ProgressInput): number | null {
 export const MAX_ASKS_WHEN_DONE = 25;
 /** Between asks while the deck is made. */
 export const ASK_EVERY_MS = 2_500;
+/** Before asking once more for the finished deck's pictures, when drawing
+ *  them failed. */
+export const RETRY_FAILED_PICTURES_MS = 60_000;
+
+export interface AskState {
+  /** Asks made since the deck was finished. */
+  asksWhenDone: number;
+  /** Asks again for finished pictures that failed (one is allowed). */
+  pictureRetries: number;
+  /** The job is past its time, or the job runner has given up on it. */
+  expired: boolean;
+}
+
+/** There is more to ask about a deck shown so far as `card` (nothing
+ *  known yet, still being made, or its pictures still drawn). */
+export function askMore(card: CardState | null): boolean {
+  return card === null || nextAsk(card, { asksWhenDone: 0, pictureRetries: 0, expired: false }) !== null;
+}
 
 /** When to ask again: in milliseconds, or null to stop. While the deck is
- *  made, every 2.5 s; once ready, at once while its pictures are drawn
- *  (Synclo holds each ask while it draws), up to a limit. */
-export function nextAsk(card: CardState, asksWhenDone: number): number | null {
-  if (card.status === "queued" || card.status === "running") return ASK_EVERY_MS;
-  if (card.status === "failed") return null;
-  if (!card.deck || card.deck.status !== "drawing") return null;
-  return asksWhenDone < MAX_ASKS_WHEN_DONE ? 0 : null;
+ *  made, every 2.5 s (unless it is past its time: then this ask was the
+ *  last); once ready, at once while its pictures are drawn (Synclo holds
+ *  each ask while it draws), up to a limit; pictures that failed are asked
+ *  for once more, a minute later. */
+export function nextAsk(card: CardState, state: AskState): number | null {
+  if (card.status === "queued" || card.status === "running") return state.expired ? null : ASK_EVERY_MS;
+  if (card.status === "failed" || card.gone || !card.deck) return null;
+  if (card.deck.status === "failed") return state.pictureRetries < 1 ? RETRY_FAILED_PICTURES_MS : null;
+  if (card.deck.status !== "drawing") return null;
+  return state.asksWhenDone < MAX_ASKS_WHEN_DONE ? 0 : null;
 }

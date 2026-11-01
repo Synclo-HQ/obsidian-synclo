@@ -20,7 +20,7 @@ const START_NOTICE_MS = 8_000;
 /**
  * What the person sees while a presentation is made. The Synclo panel shows
  * the deck as it arrives; here, a short notice at the start when the panel
- * can't be seen (on a phone it offers Watch, which opens the panel) and, on
+ * can't be seen (it offers Watch, which opens the panel) and, on
  * desktop, one line in the status bar that opens the panel when clicked.
  * The line reads the same progress the panel does (the progress board).
  */
@@ -56,8 +56,9 @@ export class ProgressView implements RunnerEvents {
     this.renderStatus();
   }
 
-  /** The start notice: on a phone always (with Watch); on a computer only
-   *  when the panel couldn't be shown, since the panel opening says it. */
+  /** The start notice: on a phone always; on a computer only when the
+   *  panel couldn't be shown, since the panel opening says it. Watch opens
+   *  the panel. */
   startNotice(job: PendingJob): void {
     const name = noteNameOf(job.notePath);
     if (Platform.isMobile) {
@@ -68,7 +69,12 @@ export class ProgressView implements RunnerEvents {
         actions: [{ label: "Watch", primary: true, run: () => void this.host.revealPanel() }],
       });
     } else {
-      richNotice({ title: `Making “${name}”`, line: "Follow it in the Synclo panel.", duration: START_NOTICE_MS });
+      richNotice({
+        title: `Making “${name}”`,
+        line: "Follow it in the Synclo panel.",
+        duration: START_NOTICE_MS,
+        actions: [{ label: "Watch", primary: true, run: () => void this.host.revealPanel() }],
+      });
     }
   }
 
@@ -86,6 +92,8 @@ export class ProgressView implements RunnerEvents {
   }
 
   async ready(job: PendingJob, gen: Generation): Promise<void> {
+    // Ready, on the board the panel reads too.
+    this.host.progressBoard.update(job.generationId, progressInputOf(gen));
     this.close(job.generationId);
     await this.host.onReady(job, gen);
   }

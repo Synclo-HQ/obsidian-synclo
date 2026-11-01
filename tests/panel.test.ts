@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { parseCardState, type CardState } from "../src/api/card";
 import { SyncloError } from "../src/api/errors";
 import { progressWords } from "../src/jobs/jobs";
-import { MAX_ASKS_WHEN_DONE, changedSlide, heroSlide, imageKey, nextAsk, panelSlides, progressShare } from "../src/panel/model";
-import { CardPoller } from "../src/panel/poller";
+import { MAX_ASKS_WHEN_DONE, RETRY_FAILED_PICTURES_MS, askMore, changedSlide, heroSlide, imageKey, nextAsk, panelSlides, progressShare, type AskState } from "../src/panel/model";
+import { CardPoller, type StopReason } from "../src/panel/poller";
+import { DeckWatch } from "../src/panel/watch";
+import type { PendingJob } from "../src/jobs/jobs";
 
 const sig = (path: string, n = 1) => `https://store.synclo.test/cards/${path}.jpg?token=t${n}`;
 
@@ -43,6 +45,8 @@ describe("reading card_state", () => {
     expect(c.deck).toEqual({ status: "drawing", pictures: [sig("d0"), null] });
     expect(card({ colors: { slide: "red", heading: "#000000", accent: "#000000" } }).colors).toBeNull();
     expect(card({ deck: { status: "failed" } }).deck).toEqual({ status: "failed" });
+    expect(card({ status: "completed", gone: true }).gone).toBe(true);
+    expect(card({}).gone).toBe(false);
   });
 });
 
@@ -58,11 +62,41 @@ describe("the slides the panel draws", () => {
   });
 
   it("puts the finished deck's pictures in place as they come, keeping the drawings until then", () => {
-    const c = card({ status: "completed", frames: frames(3, 3), document: { id: "d", title: "D", slides: 3, titles: ["One", "Two", "Three"], edit_url: "https://synclo.app/d/d" }, deck: { status: "drawing", pictures: [sig("d0"), null, sig("d2")] } });
+    const c = card({
+      status: "completed",
+      frames: frames(3, 3),
+      document: { id: "d", title: "D", slides: 3, titles: ["Slide title 1", "Slide title 2", "Slide title 3"], edit_url: "https://synclo.app/d/d" },
+      deck: { status: "drawing", pictures: [sig("d0"), null, sig("d2")] },
+    });
     expect(panelSlides(c).map((x) => [x.title, x.image])).toEqual([
-      ["One", sig("d0")],
-      ["Two", sig("f1")],
-      ["Three", sig("d2")],
+      ["Slide title 1", sig("d0")],
+      ["Slide title 2", sig("f1")],
+      ["Slide title 3", sig("d2")],
+    ]);
+  });
+
+  it("once the presentation exists, draws its own count and titles, a missing picture in its place", () => {
+    // The plan had 4 slides, the deck has 3; the finished pictures have a
+    // gap: nothing moves up into it.
+    const c = card({
+      status: "completed",
+      frames: frames(4, 4),
+      document: { id: "d", title: "D", slides: 3, titles: ["Slide title 1", "A new second", "Slide title 3"], edit_url: "https://synclo.app/d/d" },
+      deck: { status: "drawing", pictures: [null, null, sig("d2")] },
+    });
+    expect(panelSlides(c).map((x) => [x.title, x.image])).toEqual([
+      ["Slide title 1", sig("f0")],
+      // Another slide's drawing is never paired with this title.
+      ["A new second", null],
+      ["Slide title 3", sig("d2")],
+    ]);
+  });
+
+  it("counts by the titles when the presentation gives no count", () => {
+    const c = card({ status: "completed", document: { id: "d", title: "D", titles: ["One", "Two"], edit_url: "https://synclo.app/d/d" } });
+    expect(panelSlides(c).map((x) => [x.title, x.image])).toEqual([
+      ["One", null],
+      ["Two", null],
     ]);
   });
 
@@ -125,30 +159,53 @@ describe("how far along the bar is", () => {
   });
 });
 
+const fresh = (x: Partial<AskState> = {}): AskState => ({ asksWhenDone: 0, pictureRetries: 0, expired: false, ...x });
+
 describe("when to ask again", () => {
   it("asks every 2.5 s while it is made and stops when there is nothing more to show", () => {
-    expect(nextAsk(card({ status: "queued" }), 0)).toBe(2500);
-    expect(nextAsk(card({}), 0)).toBe(2500);
-    expect(nextAsk(card({ status: "failed" }), 0)).toBeNull();
-    expect(nextAsk(card({ status: "completed", deck: { status: "drawing", pictures: [null] } }), 3)).toBe(0);
-    expect(nextAsk(card({ status: "completed", deck: { status: "drawing", pictures: [null] } }), MAX_ASKS_WHEN_DONE)).toBeNull();
-    expect(nextAsk(card({ status: "completed", deck: { status: "ready", pictures: [sig("x")] } }), 1)).toBeNull();
-    expect(nextAsk(card({ status: "completed", deck: { status: "failed" } }), 1)).toBeNull();
-    expect(nextAsk(card({ status: "completed" }), 1)).toBeNull();
+    expect(nextAsk(card({ status: "queued" }), fresh())).toBe(2500);
+    expect(nextAsk(card({}), fresh())).toBe(2500);
+    expect(nextAsk(card({ status: "failed" }), fresh())).toBeNull();
+    expect(nextAsk(card({ status: "completed", deck: { status: "drawing", pictures: [null] } }), fresh({ asksWhenDone: 3 }))).toBe(0);
+    expect(nextAsk(card({ status: "completed", deck: { status: "drawing", pictures: [null] } }), fresh({ asksWhenDone: MAX_ASKS_WHEN_DONE }))).toBeNull();
+    expect(nextAsk(card({ status: "completed", deck: { status: "ready", pictures: [sig("x")] } }), fresh({ asksWhenDone: 1 }))).toBeNull();
+    expect(nextAsk(card({ status: "completed" }), fresh({ asksWhenDone: 1 }))).toBeNull();
+    expect(nextAsk(card({ status: "completed", gone: true, deck: { status: "drawing", pictures: [null] } }), fresh())).toBeNull();
+  });
+
+  it("stops after one last ask once the deck is past its time or given up on", () => {
+    expect(nextAsk(card({}), fresh({ expired: true }))).toBeNull();
+    expect(nextAsk(card({ status: "completed", deck: { status: "drawing", pictures: [null] } }), fresh({ expired: true }))).toBe(0);
+  });
+
+  it("asks once more, a minute later, for finished pictures that failed", () => {
+    expect(nextAsk(card({ status: "completed", deck: { status: "failed" } }), fresh())).toBe(RETRY_FAILED_PICTURES_MS);
+    expect(nextAsk(card({ status: "completed", deck: { status: "failed" } }), fresh({ pictureRetries: 1 }))).toBeNull();
+  });
+
+  it("knows when there is more to ask", () => {
+    expect(askMore(null)).toBe(true);
+    expect(askMore(card({}))).toBe(true);
+    expect(askMore(card({ status: "completed", deck: { status: "ready", pictures: [] } }))).toBe(false);
+    expect(askMore(card({ status: "failed" }))).toBe(false);
   });
 });
 
-function poller(answers: Array<CardState | Error>, visible = () => true) {
+function poller(answers: Array<CardState | Error | Promise<CardState>>, visible = () => true, opts: { expired?: () => boolean } = {}) {
   const seen: string[] = [];
+  const stops: Array<[StopReason, string]> = [];
   let i = 0;
+  let clock = 0;
   const timers: Array<{ fn: () => void; ms: number }> = [];
   const p = new CardPoller({
     ask: () => {
       const a = answers[Math.min(i++, answers.length - 1)];
-      return a instanceof Error ? Promise.reject(a) : Promise.resolve(a as CardState);
+      return a instanceof Error ? Promise.reject(a) : Promise.resolve(a as CardState | Promise<CardState>);
     },
     onAnswer: (c) => seen.push(c.status),
+    onStop: (reason, error) => stops.push([reason, error.message]),
     visible,
+    expired: opts.expired ?? (() => false),
     timers: {
       set: (fn, ms) => {
         timers.push({ fn, ms });
@@ -156,6 +213,7 @@ function poller(answers: Array<CardState | Error>, visible = () => true) {
       },
       clear: () => undefined,
     },
+    now: () => clock,
   });
   const flush = () => new Promise((r) => setTimeout(r, 0));
   /** Runs the next timer the poller set. */
@@ -165,7 +223,8 @@ function poller(answers: Array<CardState | Error>, visible = () => true) {
     await flush();
     return t?.ms;
   };
-  return { p, seen, asked: () => i, tick, flush, timers };
+  const advance = (ms: number) => (clock += ms);
+  return { p, seen, stops, asked: () => i, tick, flush, timers, advance };
 }
 
 describe("asking for the panel", () => {
@@ -221,11 +280,163 @@ describe("asking for the panel", () => {
     expect(t.seen).toEqual(["completed"]);
   });
 
-  it("stops when the generation isn't there", async () => {
+  it("stops when the generation isn't there, and says so", async () => {
     const t = poller([new SyncloError("rejected", "No generation with that id in this workspace.", { code: "tool_error" })]);
     t.p.wake();
     await t.flush();
     expect(t.p.finished).toBe(true);
     expect(t.timers).toHaveLength(0);
+    expect(t.stops.map((s) => s[0])).toEqual(["gone"]);
+  });
+
+  it("stops when signed out, or when the connection lacks the right, and says which", async () => {
+    const out = poller([new SyncloError("signed-out", "Connect")]);
+    out.p.wake();
+    await out.flush();
+    expect(out.stops.map((s) => s[0])).toEqual(["signed-out"]);
+    const scope = poller([new SyncloError("rejected", "This connection can't do that.", { code: "insufficient_scope" })]);
+    scope.p.wake();
+    await scope.flush();
+    expect(scope.stops).toEqual([["scope", "This connection can't do that."]]);
+  });
+
+  it("tries Synclo's own failure again", async () => {
+    const t = poller([new SyncloError("rejected", "Internal error", { code: "server_error" }), card({})]);
+    t.p.wake();
+    await t.flush();
+    expect(t.stops).toEqual([]);
+    expect(await t.tick()).toBe(5000);
+    expect(t.seen).toEqual(["running"]);
+  });
+
+  it("asks once more for a deck past its time, then stops and says so", async () => {
+    const t = poller([card({}), card({})], () => true, { expired: () => true });
+    t.p.wake();
+    await t.flush();
+    expect(t.asked()).toBe(1);
+    expect(t.p.finished).toBe(true);
+    expect(t.timers).toHaveLength(0);
+    expect(t.stops.map((s) => s[0])).toEqual(["expired"]);
+  });
+
+  it("asks for failed finished pictures once more, a minute later", async () => {
+    const failed = card({ status: "completed", deck: { status: "failed" } });
+    const t = poller([failed, failed]);
+    t.p.wake();
+    await t.flush();
+    expect(await t.tick()).toBe(RETRY_FAILED_PICTURES_MS);
+    expect(t.asked()).toBe(2);
+    expect(t.p.finished).toBe(true);
+    expect(t.timers).toHaveLength(0);
+  });
+
+  it("gives up an ask left hanging when the panel is seen again, and asks fresh", async () => {
+    const hanging = new Promise<CardState>(() => undefined);
+    const t = poller([hanging, card({})]);
+    t.p.wake();
+    await t.flush();
+    expect(t.asked()).toBe(1);
+    // Seen again soon: the ask is still fair.
+    t.advance(5_000);
+    t.p.wake();
+    await t.flush();
+    expect(t.asked()).toBe(1);
+    // Seen again after 15 s: asked afresh.
+    t.advance(11_000);
+    t.p.wake();
+    await t.flush();
+    expect(t.asked()).toBe(2);
+    expect(t.seen).toEqual(["running"]);
+  });
+
+  it("ignores an answer to an ask it gave up on", async () => {
+    let answerFirst: (c: CardState) => void = () => undefined;
+    const first = new Promise<CardState>((r) => (answerFirst = r));
+    const t = poller([first, new Promise<CardState>(() => undefined)]);
+    t.p.wake();
+    await t.flush();
+    t.advance(20_000);
+    t.p.wake();
+    await t.flush();
+    answerFirst(card({ status: "completed", deck: { status: "ready", pictures: [] } }));
+    await t.flush();
+    expect(t.seen).toEqual([]);
+    expect(t.p.finished).toBe(false);
+  });
+});
+
+const job: PendingJob = { generationId: "g1", notePath: "Notes/Donor update.md", title: "Donor update", format: "slides", base: "https://synclo.app", startedAt: 0 };
+
+function watched(answers: CardState[], opts: { signedIn?: () => boolean } = {}) {
+  let asks = 0;
+  const cards: string[] = [];
+  const timers: Array<() => void> = [];
+  const w = new DeckWatch(job, {
+    ask: () => Promise.resolve(answers[Math.min(asks++, answers.length - 1)] as CardState),
+    onCard: (_id, c) => cards.push(c.status),
+    expired: () => false,
+    signedIn: opts.signedIn ?? (() => true),
+    timers: {
+      set: (fn) => {
+        timers.push(fn);
+        return timers.length;
+      },
+      clear: () => undefined,
+    },
+    now: () => 0,
+  });
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  return { w, asked: () => asks, cards, flush, timers };
+}
+
+describe("one watch on a deck for every panel", () => {
+  it("asks once for two panels, while either can be seen, and stops when none shows it", async () => {
+    const t = watched([card({ frames: frames(3, 1) })]);
+    let aShown = false;
+    let bShown = false;
+    let drawn = 0;
+    const offA = t.w.subscribe({ changed: () => drawn++, visible: () => aShown });
+    const offB = t.w.subscribe({ changed: () => drawn++, visible: () => bShown });
+    await t.flush();
+    expect(t.asked()).toBe(0);
+    bShown = true;
+    t.w.wake();
+    await t.flush();
+    expect(t.asked()).toBe(1);
+    // Both panels drew the answer, and the board was told once.
+    expect(drawn).toBe(2);
+    expect(t.cards).toEqual(["running"]);
+    expect(t.w.slides).toHaveLength(3);
+    offA();
+    offB();
+    t.timers.shift()?.();
+    await t.flush();
+    expect(t.asked()).toBe(1);
+  });
+
+  it("says signed out without asking, and asks again once restarted", async () => {
+    let signedIn = false;
+    const t = watched([card({})], { signedIn: () => signedIn });
+    t.w.subscribe({ changed: () => undefined, visible: () => true });
+    await t.flush();
+    expect(t.asked()).toBe(0);
+    expect(t.w.stopped?.reason).toBe("signed-out");
+    signedIn = true;
+    t.w.restart();
+    await t.flush();
+    expect(t.w.stopped).toBeNull();
+    expect(t.asked()).toBe(1);
+  });
+
+  it("keeps a picture's first address, and offers the newest when it fails", async () => {
+    const t = watched([card({ frames: frames(2, 2, 2, 1) }), card({ frames: frames(2, 2, 2, 2) })]);
+    t.w.subscribe({ changed: () => undefined, visible: () => true });
+    await t.flush();
+    t.timers.shift()?.();
+    await t.flush();
+    expect(t.w.address(sig("f0", 2))).toBe(sig("f0", 1));
+    expect(t.w.fresher(sig("f0", 1))).toBe(sig("f0", 2));
+    expect(t.w.address(sig("f0", 2))).toBe(sig("f0", 2));
+    expect(t.w.fresher(sig("f0", 2))).toBeNull();
   });
 });
