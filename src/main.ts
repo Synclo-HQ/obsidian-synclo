@@ -233,7 +233,9 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
       return;
     }
     this.downloading = true;
-    const working = richNotice({ title: `Making the ${label} file`, line: `“${title}”. This can take a minute or two.` });
+    // The file is named after the presentation, which only the export knows,
+    // so this names no title the saved file might not carry.
+    const working = richNotice({ title: `Making the ${label} file`, line: "This can take a minute or two." });
     try {
       const link = await this.api.exportFile(documentId, format);
       const bytes = await fetchFile(this.http, link.url);
