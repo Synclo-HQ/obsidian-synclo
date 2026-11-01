@@ -75,7 +75,9 @@ setting). Existing files are never overwritten.
 
 ## What is sent, and when
 
-Nothing is sent until you run a command. The plugin talks only to Synclo
+The plugin talks to Synclo only when you use it: when you run one of its
+commands, connect, or open its settings or make window; and, while a
+presentation you started is being made, to check on it. It talks only to Synclo
 (`https://synclo.app`, or the server address set under Advanced):
 
 - **Connect** opens Synclo's sign-in page in your browser. Synclo sends you back
@@ -94,7 +96,8 @@ Nothing is sent until you run a command. The plugin talks only to Synclo
   Synclo returns; that link forwards to the file in Synclo's storage. Your
   sign-in is never sent to storage.
 - **Find** sends the words you type, to search your presentations' titles.
-- The settings ask Synclo for your workspace's name, credits, plan and themes.
+- The settings and the make window ask Synclo for your workspace's name,
+  credits, plan and themes, to show them.
 
 ## Your sign-in and privacy
 
