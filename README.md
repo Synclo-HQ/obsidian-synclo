@@ -2,6 +2,8 @@
 
 Turn your notes into designed presentations. Make a presentation from any note, follow it in the Synclo panel as it's written, then edit and share it in Synclo or download it as PowerPoint or PDF.
 
+![A note in Obsidian with its finished presentation in the Synclo panel](docs/synclo-panel.png)
+
 Requires a Synclo account. New accounts include 400 free credits, enough for about 40 slides. More credits are available at [synclo.app](https://synclo.app/pricing).
 
 ## Getting started
