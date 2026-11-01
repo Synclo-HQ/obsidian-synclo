@@ -1,4 +1,4 @@
-import { Modal, SuggestModal, type Editor, type TFile } from "obsidian";
+import { SuggestModal, setIcon, type Editor, type TFile } from "obsidian";
 import { messageFor } from "../api/errors";
 import type { Presentation } from "../api/synclo";
 import type { SyncloHost } from "../host";
@@ -12,7 +12,8 @@ export interface FindContext {
 /**
  * Find a Synclo presentation: the workspace's presentations, most recent
  * first, narrowed by words in the title as the person types. Choosing one
- * offers to insert a link, download it, or open it. Works without credits.
+ * lists what can be done with it: insert a link, open it, download it.
+ * Works without credits.
  */
 export class FindModal extends SuggestModal<Presentation> {
   private seq = 0;
@@ -24,6 +25,11 @@ export class FindModal extends SuggestModal<Presentation> {
   ) {
     super(host.app);
     this.setPlaceholder("Search your Synclo presentations by title");
+    this.setInstructions([
+      { command: "↑↓", purpose: "to navigate" },
+      { command: "↵", purpose: "to choose" },
+      { command: "esc", purpose: "to dismiss" },
+    ]);
     this.emptyStateText = "Looking…";
     this.limit = 20;
   }
@@ -57,44 +63,58 @@ export class FindModal extends SuggestModal<Presentation> {
   }
 }
 
-/** What to do with a presentation found. */
-class FoundModal extends Modal {
-  constructor(
-    private readonly host: SyncloHost,
-    private readonly p: Presentation,
-    private readonly context: FindContext,
-  ) {
+/** One thing to do with a presentation found. */
+interface FoundAction {
+  label: string;
+  icon: string;
+  run: () => void;
+}
+
+/**
+ * What to do with a presentation found: a second list in the same place,
+ * as Obsidian's own two-step choices are (type to narrow it, arrows and
+ * Enter, Escape to leave).
+ */
+class FoundModal extends SuggestModal<FoundAction> {
+  private readonly actions: FoundAction[];
+
+  constructor(host: SyncloHost, p: Presentation, context: FindContext) {
     super(host.app);
+    this.setPlaceholder(`${p.title}: choose what to do`);
+    this.setInstructions([
+      { command: "↑↓", purpose: "to navigate" },
+      { command: "↵", purpose: "to use" },
+      { command: "esc", purpose: "to dismiss" },
+    ]);
+    const { editor, file } = context;
+    this.actions = [
+      ...(editor
+        ? [
+            {
+              label: "Insert a link to it here",
+              icon: "link",
+              run: () => editor.replaceSelection(`[${p.title.replace(/[[\]]/g, "")}](${p.editUrl})`),
+            },
+          ]
+        : []),
+      { label: "Open in Synclo", icon: "external-link", run: () => host.openExternal(p.editUrl) },
+      { label: "Download as PowerPoint", icon: "presentation", run: () => void host.download(p.id, "pptx", file, p.title) },
+      { label: "Download as PDF", icon: "file-text", run: () => void host.download(p.id, "pdf", file, p.title) },
+    ];
   }
 
-  onOpen(): void {
-    this.setTitle(this.p.title);
-    this.modalEl.addClass("synclo-found-actions");
-    const row = this.contentEl.createDiv({ cls: "synclo-action-list" });
-    const action = (label: string, run: () => void, cta = false) => {
-      const b = row.createEl("button", { text: label, cls: cta ? "mod-cta" : "" });
-      b.addEventListener("click", () => {
-        this.close();
-        run();
-      });
-    };
-    const { editor, file } = this.context;
-    if (editor) {
-      action(
-        "Insert a link",
-        () => {
-          const title = this.p.title.replace(/[[\]]/g, "");
-          editor.replaceSelection(`[${title}](${this.p.editUrl})`);
-        },
-        true,
-      );
-    }
-    action("Open in Synclo", () => this.host.openExternal(this.p.editUrl), !editor);
-    action("Download PowerPoint", () => void this.host.download(this.p.id, "pptx", file, this.p.title));
-    action("Download PDF", () => void this.host.download(this.p.id, "pdf", file, this.p.title));
+  getSuggestions(query: string): FoundAction[] {
+    const q = query.trim().toLowerCase();
+    return q ? this.actions.filter((a) => a.label.toLowerCase().includes(q)) : this.actions;
   }
 
-  onClose(): void {
-    this.contentEl.empty();
+  renderSuggestion(a: FoundAction, el: HTMLElement): void {
+    el.addClass("synclo-found-action");
+    setIcon(el.createSpan({ cls: "synclo-found-action-icon" }), a.icon);
+    el.createSpan({ text: a.label });
+  }
+
+  onChooseSuggestion(a: FoundAction): void {
+    a.run();
   }
 }

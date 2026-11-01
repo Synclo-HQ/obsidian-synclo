@@ -219,14 +219,20 @@
   color: var(--text-muted);
 }
 
-.synclo-action-list {
+.synclo-found-action {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--size-4-2);
 }
 
-.synclo-action-list button {
-  width: 100%;
+.synclo-found-action-icon {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
+.synclo-found-action-icon svg {
+  width: var(--icon-s);
+  height: var(--icon-s);
 }
 
 /* Phones: the window's rows stack, buttons fill the width. */
