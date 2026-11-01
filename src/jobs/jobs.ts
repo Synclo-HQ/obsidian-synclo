@@ -116,9 +116,9 @@ export function progressWords(input: ProgressInput, format: Format, fallbackTitl
   if (input.status === "queued") return { title, line: "Waiting for Synclo to start…", short: "waiting to start" };
   const total = input.total;
   const written = Math.min(input.written, total);
-  if (!input.started || total === 0) {
-    return input.step === "planning" || !input.started ? { title, line: `Planning the ${unit(format, 2)}…`, short: "planning" } : { title, line: "Starting…", short: "starting" };
-  }
+  // Started, and no slides planned yet: Synclo is planning, whatever it
+  // calls the step ("directing", "designing").
+  if (!input.started || total === 0) return { title, line: `Planning the ${unit(format, 2)}…`, short: "planning" };
   if (written === 0) {
     const names = named ? input.slideTitles.filter(Boolean) : [];
     const shown = names.slice(0, 3).join(", ");
@@ -134,6 +134,6 @@ export function progressWords(input: ProgressInput, format: Format, fallbackTitl
   if (pics && pics.total > 0 && pics.made < pics.total) {
     return { title, line: `Adding images: ${pics.made} of ${pics.total}`, short: `images ${pics.made} of ${pics.total}` };
   }
-  if (input.step === "checking") return { title, line: `Checking every ${unit(format, 1)}…`, short: "checking" };
+  if (input.step === "checking" || input.step === "reviewing") return { title, line: `Checking every ${unit(format, 1)}…`, short: "checking" };
   return { title, line: "Finishing…", short: "finishing" };
 }

@@ -65,3 +65,15 @@ describe("one word on progress, from whichever answer came last", () => {
     expect(shareOf(gen)).toBeCloseTo(progressShare(card) ?? -1);
   });
 });
+
+describe("Synclo's own step names", () => {
+  const base = { status: "running" as const, title: null, started: true, total: 0, written: 0, slideTitles: [], pictures: null };
+  it("reads any step before the slides are planned as planning, never as starting", () => {
+    for (const step of ["directing", "designing", "planning", null]) {
+      expect(progressWords({ ...base, step }, "slides", "Field notes", false).line).toBe("Planning the slides…");
+    }
+  });
+  it("reads Synclo's review step as checking", () => {
+    expect(progressWords({ ...base, step: "reviewing", total: 4, written: 4 }, "slides", "Field notes", false).line).toBe("Checking every slide…");
+  });
+});

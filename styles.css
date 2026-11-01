@@ -371,11 +371,13 @@
   padding: 8%;
 }
 
+/* Two whole lines: a small frame has no room for a third. */
 .synclo-panel-frame .synclo-sketch-title {
   display: -webkit-box;
   overflow: hidden;
   font-size: var(--font-ui-smaller);
-  -webkit-line-clamp: 3;
+  line-height: var(--line-height-tight);
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
 
