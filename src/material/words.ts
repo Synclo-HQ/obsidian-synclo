@@ -1,15 +1,23 @@
 /**
- * Word counts. Synclo counts words the simple way (runs of non-space), and
- * decides from that count whether a text is source material (20 words or
+ * Word counts. Synclo counts words the simple way (runs of non-space, and
+ * characters in pairs for scripts without spaces), and decides from that count whether a text is source material (20 words or
  * more) or a brief, so the plugin decides with the same count. What the
  * window shows the person counts words as people read them, which also
  * works for languages written without spaces.
  */
 
-/** Synclo's own count: runs of non-space. */
+/** Scripts written without spaces between words. */
+const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/gu;
+
+/** Synclo's own count (apps/web/src/lib/create-limits.ts wordCount): runs
+ *  of non-space, and in scripts written without spaces about one word for
+ *  every two characters. Keep the two the same. */
 export function serverWordCount(text: string): number {
   const t = text.trim();
-  return t ? t.split(/\s+/).length : 0;
+  if (!t) return 0;
+  const unspaced = t.match(UNSPACED)?.length ?? 0;
+  const rest = t.replace(UNSPACED, " ").trim();
+  return (rest ? rest.split(/\s+/).length : 0) + Math.ceil(unspaced / 2);
 }
 
 /** Below this, Synclo reads a note as a brief to write from. */

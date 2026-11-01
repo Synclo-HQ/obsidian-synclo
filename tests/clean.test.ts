@@ -156,6 +156,10 @@ describe("words", () => {
   it("counts the way Synclo counts", () => {
     expect(serverWordCount("# Title\n\n- one two")).toBe(5);
     expect(serverWordCount("   ")).toBe(0);
+    // Scripts without spaces count about a word for every two characters,
+    // as Synclo counts them (a Chinese page is notes, not a one-word brief).
+    expect(serverWordCount("我们今年第一季度的收入增长了百分之十二，主要是因为续约翻了一番。")).toBe(17);
+    expect(serverWordCount("Mixed 中文 text here 一二三四")).toBe(6);
   });
 
   it("counts words people read, without addresses", () => {
