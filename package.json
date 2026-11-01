@@ -1,0 +1,36 @@
+{
+  "name": "synclo-obsidian",
+  "version": "1.0.0",
+  "description": "Turn an Obsidian note into a designed, editable presentation or document with Synclo, and save it as PowerPoint or PDF in your vault.",
+  "private": true,
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit --skipLibCheck",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "version": "node version-bump.mjs && git add manifest.json versions.json"
+  },
+  "keywords": [
+    "obsidian",
+    "presentation",
+    "slides",
+    "powerpoint",
+    "pdf"
+  ],
+  "author": "Synclo Inc",
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@eslint/json": "0.14.0",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
+    "eslint-plugin-obsidianmd": "0.4.2",
+    "obsidian": "1.14.4",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "3.2.7"
+  }
+}
