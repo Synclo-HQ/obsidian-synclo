@@ -427,6 +427,24 @@
   color: var(--text-on-accent);
 }
 
+/* The arrows show while the pointer is over the slide or the keyboard is on
+   them, so they never sit over the slide at rest; on touch they stay. */
+body:not(.is-mobile) .synclo-panel .synclo-panel-hero button.synclo-panel-nav {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+body:not(.is-mobile) .synclo-panel .synclo-panel-hero:hover button.synclo-panel-nav,
+body:not(.is-mobile) .synclo-panel .synclo-panel-hero:focus-within button.synclo-panel-nav {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body:not(.is-mobile) .synclo-panel .synclo-panel-hero button.synclo-panel-nav {
+    transition: none;
+  }
+}
+
 .synclo-panel .synclo-panel-hero button.synclo-panel-nav.is-prev {
   left: var(--size-2-3);
 }
