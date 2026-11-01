@@ -44,7 +44,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     this.session = new Session({ http: this.http, secrets: secretStore(this.app), crypto: window.crypto, now, base });
     this.mcp = new McpClient({ http: this.http, session: this.session, base, now });
     this.api = new SyncloApi(this.mcp);
-    this.progress = new ProgressView(this, Platform.isDesktop ? this.addStatusBarItem() : null);
+    this.progress = new ProgressView(this, Platform.isDesktopApp ? this.addStatusBarItem() : null);
     this.runner = new JobRunner({
       generation: (id, wait) => this.api.generation(id, wait),
       store: {

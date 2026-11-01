@@ -1,5 +1,5 @@
 import { Notice, Platform } from "obsidian";
-import { MESSAGES } from "../api/errors";
+import { MESSAGES, SyncloError } from "../api/errors";
 import type { Generation } from "../api/synclo";
 import type { SyncloHost } from "../host";
 import { progressText, type PendingJob } from "../jobs/jobs";
@@ -30,7 +30,7 @@ export class ProgressView implements RunnerEvents {
     private readonly host: SyncloHost,
     statusBar: HTMLElement | null,
   ) {
-    this.status = Platform.isDesktop ? statusBar : null;
+    this.status = Platform.isDesktopApp ? statusBar : null;
     if (this.status) {
       this.status.addClass("synclo-status", "mod-clickable");
       this.status.addEventListener("click", () => this.showAgain());
@@ -49,9 +49,16 @@ export class ProgressView implements RunnerEvents {
     this.update(job, t.title, t.line, t.short);
   }
 
-  trouble(job: PendingJob, message: string): void {
+  trouble(job: PendingJob, error: unknown): void {
     const s = this.shown.get(job.generationId);
-    this.update(job, s?.title ?? job.title, `Waiting to reach Synclo… ${message}`, "waiting for a connection");
+    const kind = error instanceof SyncloError ? error.kind : "network";
+    const [line, short] =
+      kind === "network"
+        ? ["Can't reach Synclo right now. It's still being made, and this updates when you're back online.", "waiting for a connection"]
+        : kind === "rate-limited"
+          ? ["Checking again in a minute. It's still being made.", "checking again soon"]
+          : ["Synclo is briefly busy. It's still being made, and this updates in a moment.", "checking again soon"];
+    this.update(job, s?.title ?? job.title, line, short);
   }
 
   async ready(job: PendingJob, gen: Generation): Promise<void> {

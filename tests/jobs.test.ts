@@ -48,7 +48,7 @@ function runner(answers: Array<Generation | Error | "hang">, options: { signedIn
       log.push("signed-out");
       readyResolve();
     },
-    trouble: (_j, m) => log.push(`trouble:${m}`),
+    trouble: (_j, e) => log.push(`trouble:${e instanceof Error ? e.message : "?"}`),
   };
   const r = new JobRunner({
     generation: (_id, wait) => {

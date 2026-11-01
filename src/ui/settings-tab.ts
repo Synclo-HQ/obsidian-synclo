@@ -117,7 +117,7 @@ export class SyncloSettingTab extends PluginSettingTab {
             render: (setting) => {
               setting.addDropdown((d) => {
                 const account = this.host.cachedAccount();
-                for (const n of lengthOptions(account?.slidesPerPrompt ?? Math.max(10, s.slides), s.slides)) d.addOption(String(n), `${n} ${unit(s.format, n)}`);
+                for (const n of lengthOptions(Math.max(account?.slidesPerPrompt ?? 10, s.slides), s.slides)) d.addOption(String(n), `${n} ${unit(s.format, n)}`);
                 d.setValue(String(s.slides)).onChange((v) => {
                   s.slides = Number(v);
                   save();

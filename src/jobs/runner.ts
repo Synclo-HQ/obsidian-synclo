@@ -17,7 +17,7 @@ export interface RunnerEvents {
   /** The sign-in ended; the job waits until the person connects again. */
   signedOut(job: PendingJob): void;
   /** A check failed for a reason that may pass (offline, Synclo busy). */
-  trouble(job: PendingJob, message: string): void;
+  trouble(job: PendingJob, error: unknown): void;
 }
 
 export interface Timers {
@@ -159,7 +159,7 @@ export class JobRunner {
             });
             return;
           }
-          this.deps.events.trouble(job, messageFor(err));
+          this.deps.events.trouble(job, err);
           const retryAfter = err instanceof SyncloError && err.kind === "rate-limited" ? (err.retryAfter ?? 60) * 1000 : 0;
           backoff = backoff ? Math.min(MAX_BACKOFF_MS, backoff * 2) : FIRST_BACKOFF_MS;
           await this.pause(loop, Math.max(backoff, retryAfter));
