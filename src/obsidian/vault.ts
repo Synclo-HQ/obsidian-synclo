@@ -1,18 +1,8 @@
 import { normalizePath, type App, type TFile } from "obsidian";
 import type { VaultFile, VaultReader } from "../material/build";
+import { joinRelative } from "../util/paths";
 
 const toFile = (f: TFile): VaultFile => ({ path: f.path, basename: f.basename, extension: f.extension, size: f.stat.size });
-
-/** A relative path ("../img/a.png") from a folder, as a vault path. */
-export function joinRelative(folder: string, relative: string): string {
-  const parts = folder ? folder.split("/") : [];
-  for (const seg of relative.split("/")) {
-    if (seg === "" || seg === ".") continue;
-    if (seg === "..") parts.pop();
-    else parts.push(seg);
-  }
-  return parts.join("/");
-}
 
 /** The vault as the material builder reads it: links resolved the way
  *  Obsidian resolves them, notes read from its cache. Only the files a

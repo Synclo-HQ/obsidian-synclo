@@ -87,6 +87,17 @@ describe("signing in", () => {
     expect(s.isSignedIn()).toBe(true);
   });
 
+  it("opens a prepared sign-in at once and still checks it on return", async () => {
+    const { s, secrets } = session(() => ({ status: 200, body: { access_token: "a", refresh_token: "r", expires_in: 3600 } }));
+    await s.prepareSignIn("Vault");
+    expect(secrets.get(SECRET_PENDING)).toBeNull();
+    const url = s.takePreparedSignIn();
+    expect(url).toMatch(/^https:\/\/synclo\.app\/oauth\/authorize\?/);
+    expect(s.takePreparedSignIn()).toBeNull();
+    const state = new URL(url ?? "").searchParams.get("state") ?? "";
+    expect((await s.finishSignIn({ code: "c", state, iss: BASE }, "Vault")).kind).toBe("connected");
+  });
+
   it("refuses an answer from another server", async () => {
     const { s } = session(() => ({ status: 200, body: {} }));
     const state = new URL(await s.startSignIn("Vault")).searchParams.get("state") ?? "";

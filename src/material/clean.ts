@@ -133,7 +133,7 @@ function isParagraph(line: string | undefined): boolean {
   return true;
 }
 
-const TAG = /(^|[\s\uE002])#([\p{L}\p{N}\p{M}_/-]+)/gu;
+const TAG = /(^|\s)#([\p{L}\p{N}\p{M}_/-]+)/gu;
 const WIKI = /(!?)\[\[([^[\]\n]+?)\]\]/g;
 const MD_LINK = /(!?)\[((?:[^[\]\n]|\[[^[\]\n]*\])*)\]\(\s*(<[^>\n]*>|(?:[^\s()]|\([^\s()]*\))+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?\s*\)/g;
 const FIELD_BRACKET = /\[([\p{L}\p{N}][\p{L}\p{N} _/-]{0,60}?)::[ \t]*([^\]\n]*)\]/gu;
@@ -395,6 +395,8 @@ export function cleanMarkdown(markdown: string, options: CleanOptions): CleanRes
     removedInLine = false;
     const scanned = scan(line, mode);
     mode = scanned.mode;
+    // A line wholly inside a comment leaves no trace, not even a break.
+    if (startedIn !== "normal" && mode !== "normal") continue;
     let text = scanned.text;
     if (BLOCK_ID_TAIL.test(text)) text = text.replace(BLOCK_ID_TAIL, "");
     if (removedInLine) text = text.replace(/[ \t]+$/, "");

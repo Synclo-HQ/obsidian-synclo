@@ -96,12 +96,12 @@ export class SyncloSettingTab extends PluginSettingTab {
         heading: "New presentations",
         rows: [
           {
-            name: "Make",
-            desc: "What a note becomes.",
+            name: "Format",
+            desc: "Slides, or a document of sections.",
             render: (setting) => {
               setting.addDropdown((d) =>
                 d
-                  .addOptions({ slides: "Slides", document: "A document" })
+                  .addOptions({ slides: "Slides", document: "Document" })
                   .setValue(s.format)
                   .onChange((v) => {
                     s.format = v === "document" ? "document" : "slides";
@@ -264,6 +264,7 @@ export class SyncloSettingTab extends PluginSettingTab {
           });
           return;
         }
+        this.host.prepareConnect();
         setting.setName("Synclo account");
         setting.setDesc(
           this.signingIn

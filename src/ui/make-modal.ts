@@ -111,6 +111,10 @@ export class MakeModal extends Modal {
     this.building = run;
     try {
       await run;
+    } catch {
+      this.summaryEl.empty();
+      this.summaryEl.createDiv({ cls: "synclo-summary-title", text: this.source.file.basename });
+      this.summaryEl.createDiv({ cls: "synclo-warning", text: "This note couldn't be read. Close this window and try again." });
     } finally {
       if (this.building === run) this.building = null;
     }
@@ -188,6 +192,7 @@ export class MakeModal extends Modal {
   }
 
   private renderConnect(el: HTMLElement): void {
+    this.host.prepareConnect();
     const box = el.createDiv({ cls: "synclo-connect" });
     if (this.waitingForSignIn) {
       box.createDiv({ text: "Finish signing in in your browser. This window picks up where you left off when you come back." });
@@ -210,9 +215,9 @@ export class MakeModal extends Modal {
     const account = this.host.cachedAccount();
     const generate = this.mode() === "generate";
 
-    new Setting(el).setName("Make").addDropdown((d) =>
+    new Setting(el).setName("Format").addDropdown((d) =>
       d
-        .addOptions({ slides: "Slides", document: "A document" })
+        .addOptions({ slides: "Slides", document: "Document" })
         .setValue(c.format)
         .onChange((v) => {
           c.format = v === "document" ? "document" : "slides";
@@ -327,6 +332,7 @@ export class MakeModal extends Modal {
       el.createEl("button", { text: "Get more credits" }).addEventListener("click", () => this.host.openExternal(this.host.creditsUrl()));
     }
     if (e.signedOut) {
+      this.host.prepareConnect();
       el.createEl("button", { text: "Connect again" }).addEventListener("click", () => {
         this.waitingForSignIn = true;
         void this.host.connect();
@@ -385,6 +391,7 @@ export class MakeModal extends Modal {
         }
       }
       const input = mode === "generate" ? withPictures(m, new Map()) : withPictures(m, urls);
+      if (input.length > LIMITS.maxInputChars) throw new SyncloError("too-large", "With its pictures this is too long to send in one go. Make a presentation from a selection instead.");
       this.setBusy("Starting…");
       const started = await this.host.api.create({
         input,

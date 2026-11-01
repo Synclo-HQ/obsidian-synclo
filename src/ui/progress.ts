@@ -70,15 +70,20 @@ export class ProgressView implements RunnerEvents {
   }
 
   signedOut(job: PendingJob): void {
-    const s = this.shown.get(job.generationId);
-    s?.notice?.hide();
+    this.close(job.generationId);
     if (this.signedOutTold) return;
     this.signedOutTold = true;
+    this.host.prepareConnect();
     richNotice({
-      title: "Connect Synclo again",
-      line: `Your sign-in ended while “${job.title || "a presentation"}” was being made. Connect again and the link will still land in the note.`,
+      title: "Connect Synclo to finish",
+      line: `“${job.title || "Your presentation"}” is still being made. Connect again and its link lands in the note when it's ready.`,
       actions: [{ label: "Connect", primary: true, run: () => void this.host.connect() }],
     });
+  }
+
+  /** Connected again: a later sign-out is told again. */
+  signedIn(): void {
+    this.signedOutTold = false;
   }
 
   /** Every notice closed and the status bar cleared (the plugin unloads). */

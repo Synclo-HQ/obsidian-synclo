@@ -18,6 +18,8 @@ export interface SyncloHost {
   saveSettings(): Promise<void>;
   /** Opens Synclo's sign-in in the browser. */
   connect(): Promise<void>;
+  /** Gets a sign-in ready, for a Connect button about to be shown. */
+  prepareConnect(): void;
   disconnect(): Promise<void>;
   /** The workspace, its credits and plan; cached for a minute. */
   account(force?: boolean): Promise<Account | null>;

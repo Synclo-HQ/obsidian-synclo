@@ -95,14 +95,43 @@ export class Session {
 
   /** The address to open in the browser to sign in. */
   async startSignIn(vaultName: string): Promise<string> {
+    const prepared = await this.prepare(vaultName);
+    this.keep(prepared.pending);
+    return prepared.url;
+  }
+
+  /**
+   * Gets a sign-in ready before the person clicks Connect, so the click can
+   * open the browser at once (a browser may refuse to open a page after
+   * the click has waited on anything).
+   */
+  async prepareSignIn(vaultName: string): Promise<void> {
+    this.prepared = await this.prepare(vaultName);
+  }
+
+  /** The prepared sign-in's address, now started; null when none is ready. */
+  takePreparedSignIn(): string | null {
+    const p = this.prepared;
+    this.prepared = null;
+    if (!p || p.pending.base !== this.deps.base() || this.deps.now() - p.pending.createdAt > PENDING_LIFE_MS / 2) return null;
+    this.keep({ ...p.pending, createdAt: this.deps.now() });
+    return p.url;
+  }
+
+  private prepared: { url: string; pending: Pending } | null = null;
+
+  private async prepare(vaultName: string): Promise<{ url: string; pending: Pending }> {
     const base = this.deps.base();
     const verifier = randomToken(this.deps.crypto, 32);
     const state = makeState(this.deps.crypto, vaultName);
     const pending: Pending = { v: 1, state, verifier, base, createdAt: this.deps.now() };
-    // Kept in secret storage, so a phone that closes Obsidian while the
-    // browser is open can still finish the sign-in.
+    return { url: authorizeUrl(base, await challengeFor(this.deps.crypto, verifier), state), pending };
+  }
+
+  /** Kept in secret storage, so a phone that closes Obsidian while the
+   *  browser is open can still finish the sign-in. */
+  private keep(pending: Pending): void {
     this.deps.secrets.set(SECRET_PENDING, JSON.stringify(pending));
-    return authorizeUrl(base, await challengeFor(this.deps.crypto, verifier), state);
   }
 
   /** Finishes a sign-in from the obsidian://synclo-auth answer. */

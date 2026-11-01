@@ -1,7 +1,13 @@
 import type { Http, HttpRequest, HttpResponse } from "../src/api/http";
 import type { SecretStore } from "../src/auth/session";
 
-export type Handler = (req: HttpRequest) => { status: number; body?: unknown; headers?: Record<string, string>; raw?: string } | Promise<{ status: number; body?: unknown; headers?: Record<string, string>; raw?: string }>;
+export interface FakeAnswer {
+  status: number;
+  body?: unknown;
+  headers?: Record<string, string>;
+  raw?: string;
+}
+export type Handler = (req: HttpRequest) => FakeAnswer | Promise<FakeAnswer>;
 
 /** A stand-in for Synclo's server: answers each request with the handler,
  *  and keeps every request for the test to read. */

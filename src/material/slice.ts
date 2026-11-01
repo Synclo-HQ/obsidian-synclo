@@ -60,8 +60,7 @@ function blockAt(lines: string[], id: string): [number, number] | null {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
     if (alone.test(line)) {
-      let start = i;
-      while (start > 0 && (lines[start - 1] ?? "").trim() !== "") start--;
+      const start = paragraphStart(lines, i);
       return start < i ? [start, i] : null;
     }
     if (!tail.test(line)) continue;
@@ -78,11 +77,21 @@ function blockAt(lines: string[], id: string): [number, number] | null {
       }
       return [i, end];
     }
-    let start = i;
-    while (start > 0 && (lines[start - 1] ?? "").trim() !== "") start--;
-    return [start, i + 1];
+    return [paragraphStart(lines, i), i + 1];
   }
   return null;
+}
+
+/** The first line of the block that ends at line `i`: back to a blank
+ *  line or a heading (a heading is a block of its own). */
+function paragraphStart(lines: string[], i: number): number {
+  let start = i;
+  while (start > 0) {
+    const prev = lines[start - 1] ?? "";
+    if (prev.trim() === "" || /^#{1,6}[ \t]/.test(prev)) break;
+    start--;
+  }
+  return start;
 }
 
 /** The text a subpath points at, or null when the note has no such part. */

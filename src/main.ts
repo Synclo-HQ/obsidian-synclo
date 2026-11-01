@@ -64,8 +64,12 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
       this.session.onChange((signedIn, reason) => {
         this.accountCache = null;
         this.themesCache = null;
-        if (signedIn) this.runner.resumeAll();
-        else if (reason === "expired") {
+        if (signedIn) {
+          this.progress.signedIn();
+          this.runner.resumeAll();
+        } else if (reason === "expired" && !this.runner.list().some((j) => j.base === this.base())) {
+          // With presentations waiting, their notice says it instead.
+          this.prepareConnect();
           richNotice({ title: "Your Synclo sign-in has ended", line: "Connect again to keep making presentations.", actions: [{ label: "Connect", primary: true, run: () => void this.connect() }] });
         }
       }),
@@ -101,11 +105,17 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
 
   async connect(): Promise<void> {
     try {
-      const url = await this.session.startSignIn(this.app.vault.getName());
+      // Opened in the same moment as the click when a sign-in is ready.
+      const url = this.session.takePreparedSignIn() ?? (await this.session.startSignIn(this.app.vault.getName()));
       window.open(url);
+      this.prepareConnect();
     } catch (err) {
       new Notice(`Synclo couldn't start signing in. ${messageFor(err)}`);
     }
+  }
+
+  prepareConnect(): void {
+    if (!this.session.isSignedIn()) void this.session.prepareSignIn(this.app.vault.getName()).catch(() => undefined);
   }
 
   async disconnect(): Promise<void> {
@@ -178,7 +188,11 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
     }
     const count = `${doc.slides} ${unit(job.format, doc.slides)}`;
     const credits = gen.credits.used !== null ? ` Used ${gen.credits.used.toLocaleString()} credits${gen.credits.remaining !== null ? `; ${gen.credits.remaining.toLocaleString()} left` : ""}.` : "";
-    const where = linkWritten ? " The link is in the note's properties." : file ? " The link couldn't be written into the note's properties." : "";
+    const where = linkWritten
+      ? " The link is in the note's properties."
+      : file
+        ? " The link couldn't be written into the note's properties; check that they are valid."
+        : " The note was moved out of the vault or deleted, so the link wasn't written.";
     richNotice({
       title: `“${doc.title}” is ready`,
       line: `${count}.${where}${credits}`,
@@ -358,6 +372,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
   }
 
   private askToConnect(): void {
+    this.prepareConnect();
     richNotice({
       title: "Connect Synclo first",
       line: "Sign in at synclo.app; a free account comes with 400 credits.",
@@ -380,6 +395,7 @@ export default class SyncloPlugin extends Plugin implements SyncloHost {
         new Notice("Synclo wasn't connected.");
         return;
       case "failed":
+        this.prepareConnect();
         richNotice({ title: "Synclo couldn't connect", line: result.message, duration: 10_000, actions: [{ label: "Try again", run: () => void this.connect() }] });
         return;
       case "elsewhere": {
