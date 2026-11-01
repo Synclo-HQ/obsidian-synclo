@@ -3,7 +3,7 @@
   "name": "Synclo",
   "version": "1.0.0",
   "minAppVersion": "1.11.4",
-  "description": "Turn a note into a designed presentation deck with editable slides, or a document, then save it as PowerPoint or PDF in your vault. Your words, embedded notes and images come along. Needs a Synclo account.",
+  "description": "Turn your notes into designed presentations with Synclo, then download them as PowerPoint or PDF.",
   "author": "Synclo Inc",
   "authorUrl": "https://synclo.app",
   "isDesktopOnly": false
